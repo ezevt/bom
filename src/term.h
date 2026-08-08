@@ -1,8 +1,7 @@
 #ifndef TERM_H
 #define TERM_H
 
-#include <stddef.h>
-#include <stdint.h>
+#include "defs.h"
 
 enum {
     KEY_NONE = -1,
@@ -15,8 +14,8 @@ enum { MOD_CTRL = 1, MOD_ALT = 2, MOD_SHIFT = 4 };
 typedef enum { EV_NONE, EV_KEY } EventType;
 
 typedef struct {
-    int32_t code; // rune or KEY_*
-    uint8_t mods;
+    b32 code; // rune or KEY_*
+    b8 mods;
 } Key;
 
 typedef struct {
@@ -24,16 +23,16 @@ typedef struct {
     Key key;
 } Event;
 
-int  term_init(void);
+i32  term_init(void);
 void term_shutdown(void);
-int  term_get_size(int* rows, int* cols);
+i32  term_get_size(i32* rows, i32* cols);
 
 Event term_poll(void);
 
 void term_write(const char* s, size_t n);
 void term_writef(const char* fmt, ...);
 void term_clear(void);
-void term_move_cursor(int row, int col);
+void term_move_cursor(i32 row, i32 col);
 void term_cursor_hide(void);
 void term_cursor_show(void);
 

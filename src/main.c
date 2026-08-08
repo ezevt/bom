@@ -6,9 +6,8 @@ int main(void) {
     while (1) {
         Event ev = term_poll();
 
-        int w, h;
+        i32 w, h;
         term_get_size(&h, &w);
-        term_writef("gola");
 
         term_writef("w: %d, h: %d \r\n", w, h);
 

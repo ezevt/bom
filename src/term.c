@@ -10,9 +10,9 @@
 #include <unistd.h>
 
 static struct termios orig;
-static int raw_active = 0;
+static i32 raw_active = 0;
 
-int term_init(void) {
+i32 term_init(void) {
     if (!isatty(STDIN_FILENO)) return -1;
     if (tcgetattr(STDIN_FILENO, &orig) == -1) return -1;
 
@@ -41,7 +41,7 @@ void term_shutdown(void) {
     raw_active = 0;
 }
 
-static int get_cursor_position(int* rows, int* cols) {
+static i32 get_cursor_position(int* rows, int* cols) {
     char buf[32];
     unsigned int i = 0;
 
@@ -63,7 +63,7 @@ static int get_cursor_position(int* rows, int* cols) {
     return 0;
 }
 
-int  term_get_size(int* rows, int* cols) {
+i32 term_get_size(i32* rows, i32* cols) {
     struct winsize ws;
 
     if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == -1 || ws.ws_col == 0) {
@@ -80,7 +80,7 @@ static Event none_event(void) {
     return (Event){0};
 }
 
-static Event key_event(int32_t code, uint8_t mods) {
+static Event key_event(i32 code, b8 mods) {
     return (Event){
         .type = EV_KEY,
         .key = {
@@ -91,7 +91,7 @@ static Event key_event(int32_t code, uint8_t mods) {
 }
 
 Event term_poll(void) {
-    int nread;
+    i32 nread;
     char c;
     while ((nread = read(STDIN_FILENO, &c, 1)) != 1) {
         if (nread == -1 && errno != EAGAIN) { 
@@ -122,7 +122,7 @@ void term_clear(void) {
     write(STDOUT_FILENO, "\x1b[H", 3);
 }
 
-void term_move_cursor(int row, int col) {
+void term_move_cursor(i32 row, i32 col) {
     char buf[32];
     snprintf(buf, sizeof(buf), "\x1b[%d;%dH", row + 1, col + 1);
     term_write(buf, strlen(buf));
