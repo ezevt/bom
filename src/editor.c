@@ -45,8 +45,6 @@ void editor_init(Editor* e) {
 void editor_shutdown(Editor* e) {
     if (e->num_lines <= 0) return;
 
-    printf("freeing %d lines \n", e->num_lines);
-
     for (i32 i = 0; i < e->num_lines; i++) {
         free(e->lines[i].chars);
     }

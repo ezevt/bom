@@ -14,9 +14,10 @@ typedef struct {
 } Line;
 
 typedef struct {
-    Cursor cursor;
+    b8 running;
 
-    bool running;
+    Cursor cursor;
+    i32 offset;
 
     i32 num_lines;
     Line* lines;

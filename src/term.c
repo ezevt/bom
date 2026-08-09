@@ -41,7 +41,7 @@ i32 term_init(void) {
 }
 
 void term_shutdown(void) {
-    term_clear();
+    term_writef("\x1b[?1049l");
     term_flush();
 
     if (!raw_active) return;
@@ -62,8 +62,6 @@ static i32 get_cursor_position(int* rows, int* cols) {
     }
 
     buf[i] = '\0';
-
-    printf("\r\n&buf[1]: '%s'\r\n", &buf[1]);
 
     if (buf[0] != '\x1b' || buf[1] != '[') return -1;
     if (sscanf(&buf[2], "%d;%d", rows, cols) != 2) return -1;
