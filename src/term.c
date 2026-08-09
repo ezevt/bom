@@ -90,18 +90,126 @@ static Event key_event(i32 code, b8 mods) {
     };
 }
 
-Event term_poll(void) {
-    i32 nread;
-    char c;
-    while ((nread = read(STDIN_FILENO, &c, 1)) != 1) {
-        if (nread == -1 && errno != EAGAIN) { 
-            return none_event();
+static u8 ibuf[32];
+static i32 ilen = 0, ipos = 0;
+
+static i32 next_byte(void) {
+    if (ipos < ilen) return ibuf[ipos++];
+    
+    i32 n = read(STDIN_FILENO, ibuf, sizeof(ibuf));
+    if (n <= 0) {
+        ilen = 0;
+        ipos = 0;
+        return -1;
+    }
+    
+    ilen = n;
+    ipos = 0;
+    
+    return ibuf[ipos++];
+}
+
+static i32 peek_byte(void) {
+    if (ipos < ilen) return ibuf[ipos];
+    
+    i32 n = read(STDIN_FILENO, ibuf, sizeof(ibuf));
+    if (n <= 0) {
+        ilen = 0;
+        ipos = 0;
+        return -1;
+    }
+
+    ilen = n;
+    ipos = 0;
+
+    return ibuf[ipos];
+}
+
+static Event parse_csi(void) {
+    i32 params[4] = {0}, np = 0;
+    i32 c;
+    for (;;) {
+        c = next_byte();
+        if (c < 0) return none_event();
+        if (c >= '0' && c <= '9') {
+            if (np == 0) np = 1;
+            params[np-1] = params[np-1] * 10 + (c - '0');
+        } else if (c == ';') {
+            if (np < 4) np++;
+        } else break;
+    }
+
+    b8 mods = 0;
+    if (np >= 2 && params[1] > 0) {
+        i32 m = params[1] - 1;
+        if (m & 1) mods |= MOD_SHIFT;
+        if (m & 2) mods |= MOD_ALT;
+        if (m & 4) mods |= MOD_CTRL;
+    }
+
+    switch (c) {
+    case 'A': return key_event(KEY_UP, mods);
+    case 'B': return key_event(KEY_DOWN, mods);
+    case 'C': return key_event(KEY_RIGHT, mods);
+    case 'D': return key_event(KEY_LEFT, mods);
+    case 'H': return key_event(KEY_HOME, mods);
+    case 'F': return key_event(KEY_END, mods);
+    case '~':
+        switch (params[0]) {
+        case 1: case 7: return key_event(KEY_HOME, mods);
+        case 4: case 8: return key_event(KEY_END, mods);
+        case 3: return key_event(KEY_DEL, mods);
+        case 5: return key_event(KEY_PGUP, mods);
+        case 6: return key_event(KEY_PGDN, mods);
         }
     }
 
+    return none_event();
+}
+
+static Event decode_utf8(i32 first) {
+    i32 len, cp;
+    if      ((first & 0x80) == 0)    return key_event(first, 0);
+    else if ((first & 0xE0) == 0xC0) { len = 1; cp = first & 0x1F; }
+    else if ((first & 0xF0) == 0xE0) { len = 2; cp = first & 0x0F; }
+    else if ((first & 0xF8) == 0xF0) { len = 3; cp = first & 0x07; }
+    else return none_event();
+
+    for (i32 i = 0; i < len; i++) {
+        i32 b = next_byte();
+        if (b < 0 || (b & 0xC0) != 0x80) return none_event();
+        cp = (cp << 6) | (b & 0x3F);
+    }
+    return key_event(cp, 0);
+}
+
+Event term_poll(void) {
+    i32 c = next_byte();
+    if (c < 0) return none_event();
+
+    if (c == 0x1b) {
+        i32 n = peek_byte();
+        
+        if (n < 0) return key_event(KEY_ESC, 0);
+
+        if (n == '[') {
+            ipos++;
+            return parse_csi();
+        }
+
+        ipos++;
+        Event e = decode_utf8(n);
+
+        if (e.type == EV_KEY) e.key.mods |= MOD_ALT;
+
+        return e;
+    }
+
+    if (c == KEY_TAB || c == KEY_ENTER) return key_event(c, 0);
+    if (c == KEY_BACKSPACE) return key_event(KEY_BACKSPACE, 0);
     if (c < 0x20) return key_event(c + 'a' - 1, MOD_CTRL);
 
-    return key_event(c, 0);
+    return decode_utf8(c);
 }
 
 void term_write(const char* s, size_t n) {

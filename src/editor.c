@@ -9,11 +9,29 @@ void editor_init(Editor* e) {
 void editor_shutdown(Editor* e) {}
 
 void editor_dispatch(Editor* e, Event ev) {
-    if (ev.type == EV_KEY) {
-        if (ev.key.code == 'q' && ev.key.mods == MOD_CTRL) {
+    if (ev.type != EV_KEY) return;
+    if (ev.key.mods == MOD_CTRL) {
+        if (ev.key.code == 'q') {
             term_clear();
             exit(0);
         }
+        
+        return;
+    }
+
+    switch (ev.key.code) {
+        case KEY_UP:
+            e->cursor.y--;
+            break;
+        case KEY_DOWN:
+            e->cursor.y++;
+            break;
+        case KEY_LEFT:
+            e->cursor.x--;
+            break;
+        case KEY_RIGHT:
+            e->cursor.x++;
+            break;
     }
 }
 
@@ -22,6 +40,10 @@ static void draw_rows(Editor* e) {
     term_get_size(&rows, &cols);
 
     for (i32 i = 0; i < rows; i++) {
+        if (i == 1) {
+            term_writef("cx: %d, cy: %d", e->cursor.x, e->cursor.y);
+        }
+
         if (i == rows/3) {
             term_writef("BOM - version %s", BOM_VERSION);
         } else {
