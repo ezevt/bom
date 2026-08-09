@@ -1,19 +1,16 @@
-#include "term.h"
+#include "editor.h"
 
 int main(void) {
+    Editor e = {0};
+    
     term_init();
+    editor_init(&e);
 
     while (1) {
         Event ev = term_poll();
 
-        i32 w, h;
-        term_get_size(&h, &w);
-
-        term_writef("w: %d, h: %d \r\n", w, h);
-
-        if (ev.type == EV_KEY) {
-            if (ev.key.code == 'q' && ev.key.mods == MOD_CTRL) break;
-        }
+        editor_dispatch(&e, ev);
+        editor_render(&e);
     }
 
     term_shutdown();

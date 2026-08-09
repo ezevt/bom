@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include <stdlib.h>
 
 typedef int8_t   i8;
 typedef int16_t i16;
@@ -18,5 +19,7 @@ typedef  i8  b8;
 typedef i32 b32;
 
 #define UNUSED(x) (void)(x)
+
+#define BOM_VERSION "0.0.1"
 
 #endif
