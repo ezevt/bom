@@ -1,6 +1,5 @@
 #include "term.h"
 
-#include <errno.h>
 #include <sys/ioctl.h>
 #include <stdarg.h>
 #include <string.h>
@@ -11,6 +10,9 @@
 
 static struct termios orig;
 static i32 raw_active = 0;
+
+static char* abuf;
+static i32 alen;
 
 i32 term_init(void) {
     if (!isatty(STDIN_FILENO)) return -1;
@@ -23,11 +25,13 @@ i32 term_init(void) {
     raw.c_oflag &= ~(OPOST);
     raw.c_cflag |= CS8;
 
-    raw.c_cc[VMIN] = 0;
     raw.c_cc[VTIME] = 1; // 100ms
 
     if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw) == -1) return -1;
     raw_active = 1;
+
+    abuf = 0;
+    alen = 0;
 
     atexit(term_shutdown);
     term_writef("\x1b[?1049h");
@@ -36,6 +40,7 @@ i32 term_init(void) {
 }
 
 void term_shutdown(void) {
+    term_flush();
     if (!raw_active) return;
     tcsetattr(STDIN_FILENO, TCSAFLUSH, &orig);
     raw_active = 0;
@@ -212,8 +217,17 @@ Event term_poll(void) {
     return decode_utf8(c);
 }
 
-void term_write(const char* s, size_t n) {
-    write(STDOUT_FILENO, s, n);
+static void abuf_append(const char* s, i32 len) {
+    char* new = realloc(abuf, alen + len);
+
+    if (new == NULL) return;
+    memcpy(&new[alen], s, len);
+    abuf = new;
+    alen += len;
+}
+
+void term_write(const char* s, i32 n) {
+    abuf_append(s, n);
 }
 
 void term_writef(const char* fmt, ...) {
@@ -223,6 +237,15 @@ void term_writef(const char* fmt, ...) {
     char tmp[128];
     int n = vsnprintf(tmp, sizeof(tmp), fmt, ap);
     term_write(tmp, (size_t)n < sizeof(tmp) ? (size_t)n : sizeof tmp - 1);
+
+    va_end(ap);
+}
+
+void term_flush(void) {
+    write(STDOUT_FILENO, abuf, alen);
+    free(abuf);
+    abuf = NULL;
+    alen = 0;
 }
 
 void term_clear(void) {

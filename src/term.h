@@ -32,8 +32,9 @@ i32  term_get_size(i32* rows, i32* cols);
 
 Event term_poll(void);
 
-void term_write(const char* s, size_t n);
+void term_write(const char* s, i32 n);
 void term_writef(const char* fmt, ...);
+void term_flush(void);
 void term_clear(void);
 void term_move_cursor(i32 row, i32 col);
 void term_cursor_hide(void);

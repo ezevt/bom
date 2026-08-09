@@ -11,6 +11,8 @@ int main(void) {
 
         editor_dispatch(&e, ev);
         editor_render(&e);
+        
+        term_flush();
     }
 
     term_shutdown();
