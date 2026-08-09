@@ -19,6 +19,8 @@ typedef struct {
     Cursor cursor;
     i32 offset;
 
+    i32 rows, cols;
+
     i32 num_lines;
     Line* lines;
 } Editor;

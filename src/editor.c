@@ -4,6 +4,8 @@
 #include <stdio.h>
 #include <string.h>
 
+#define V_MARGIN 8
+
 static void editor_append_line(Editor* e, char* s, size_t len) {
     e->lines = realloc(e->lines, sizeof(Line) * (e->num_lines + 1));
 
@@ -40,6 +42,10 @@ void editor_init(Editor* e) {
     e->cursor = (Cursor){0, 0};
     e->num_lines = 0;
     e->lines = NULL;
+
+    e->offset = 0;
+    
+    term_get_size(&e->rows, &e->cols);
 }
 
 void editor_shutdown(Editor* e) {
@@ -50,6 +56,24 @@ void editor_shutdown(Editor* e) {
     }
 
     free(e->lines);
+}
+
+static void editor_scroll(Editor* e) {
+    i32 margin = V_MARGIN;
+
+    if (margin * 2 >= e->rows)
+        margin = e->rows / 2;
+
+    if (e->cursor.y < e->offset + margin) {
+        e->offset = e->cursor.y - margin;
+    }
+
+    if (e->cursor.y >= e->offset + e->rows - margin) {
+        e->offset = e->cursor.y - e->rows + margin + 1;
+    }
+
+    if (e->offset < 0)
+        e->offset = 0;
 }
 
 void editor_dispatch(Editor* e, Event ev) {
@@ -64,10 +88,12 @@ void editor_dispatch(Editor* e, Event ev) {
 
     switch (ev.key.code) {
         case KEY_UP:
-            e->cursor.y--;
+            if (e->cursor.y > 0)
+                e->cursor.y--;
             break;
         case KEY_DOWN:
-            e->cursor.y++;
+            if (e->cursor.y < e->num_lines)
+                e->cursor.y++;
             break;
         case KEY_LEFT:
             e->cursor.x--;
@@ -76,27 +102,28 @@ void editor_dispatch(Editor* e, Event ev) {
             e->cursor.x++;
             break;
     }
+
+    editor_scroll(e);
 }
 
 static void draw_rows(Editor* e) {
-    i32 rows, cols;
-    term_get_size(&rows, &cols);
 
-    for (i32 i = 0; i < rows; i++) {
-        if (i >= e->num_lines) {
-            if (e->num_lines == 0 && i == rows/3) {
+    for (i32 i = 0; i < e->rows; i++) {
+        i32 file_row = i + e->offset;
+        if (file_row >= e->num_lines) {
+            if (e->num_lines == 0 && i == e->rows/3) {
                 term_writef("BOM - version %s", BOM_VERSION);
             } else {
                 term_write("~", 1);
             }
         } else {
-            int len = e->lines[i].size;
-            if (len > cols) len = cols;
-            term_write(e->lines[i].chars, e->lines[i].size);
+            int len = e->lines[file_row].size;
+            if (len > e->cols) len = e->cols;
+            term_write(e->lines[file_row].chars, e->lines[file_row].size);
         }
 
         term_write("\x1b[K", 3);
-        if (i < rows - 1) {
+        if (i < e->rows - 1) {
             term_write("\r\n", 2);
         }
     }
@@ -108,6 +135,22 @@ void editor_render(Editor* e) {
 
     draw_rows(e);
 
-    term_move_cursor(e->cursor.y, e->cursor.x);
+    i32 screen_y = e->cursor.y - e->offset;
+
+    if (screen_y < 0)
+        screen_y = 0;
+
+    if (screen_y >= e->rows)
+        screen_y = e->rows - 1;
+
+    i32 screen_x = e->cursor.x;
+
+    if (screen_x < 0)
+        screen_x = 0;
+
+    if (screen_x >= e->cols)
+        screen_x = e->cols - 1;
+
+    term_move_cursor(screen_y, screen_x);
     term_cursor_show();
 }
