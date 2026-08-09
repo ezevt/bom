@@ -1,19 +1,64 @@
 #include "editor.h"
 #include "defs.h"
 #include "term.h"
+#include <stdio.h>
+#include <string.h>
 
-void editor_init(Editor* e) {
-    e->cursor = (Cursor){0, 0};
+static void editor_append_line(Editor* e, char* s, size_t len) {
+    e->lines = realloc(e->lines, sizeof(Line) * (e->num_lines + 1));
+
+    int at = e->num_lines;
+    e->lines[at].size = len;
+    e->lines[at].chars = malloc(len + 1);
+    memcpy(e->lines[at].chars, s, len);
+    e->lines[at].chars[len] = '\0';
+    e->num_lines++;
 }
 
-void editor_shutdown(Editor* e) {}
+void editor_open(Editor* e, const char* filepath) {
+    FILE* fp = fopen(filepath, "r");
+    if (!fp) return;
+
+    char* line = NULL;
+    size_t linecap = 0;
+    ssize_t linelen;
+
+    while ((linelen = getline(&line, &linecap, fp)) != -1) {
+        while (linelen > 0 && (line[linelen - 1] == '\n' ||
+                               line[linelen - 1] == '\r'))
+            linelen--;
+
+        editor_append_line(e, line, linelen);
+    }
+
+    free(line);
+    fclose(fp);
+}
+
+void editor_init(Editor* e) {
+    e->running = true;
+    e->cursor = (Cursor){0, 0};
+    e->num_lines = 0;
+    e->lines = NULL;
+}
+
+void editor_shutdown(Editor* e) {
+    if (e->num_lines <= 0) return;
+
+    printf("freeing %d lines \n", e->num_lines);
+
+    for (i32 i = 0; i < e->num_lines; i++) {
+        free(e->lines[i].chars);
+    }
+
+    free(e->lines);
+}
 
 void editor_dispatch(Editor* e, Event ev) {
     if (ev.type != EV_KEY) return;
     if (ev.key.mods == MOD_CTRL) {
         if (ev.key.code == 'q') {
-            term_clear();
-            exit(0);
+            e->running = false;
         }
         
         return;
@@ -40,14 +85,16 @@ static void draw_rows(Editor* e) {
     term_get_size(&rows, &cols);
 
     for (i32 i = 0; i < rows; i++) {
-        if (i == 1) {
-            term_writef("cx: %d, cy: %d", e->cursor.x, e->cursor.y);
-        }
-
-        if (i == rows/3) {
-            term_writef("BOM - version %s", BOM_VERSION);
+        if (i >= e->num_lines) {
+            if (e->num_lines == 0 && i == rows/3) {
+                term_writef("BOM - version %s", BOM_VERSION);
+            } else {
+                term_write("~", 1);
+            }
         } else {
-            term_write("~", 1);
+            int len = e->lines[i].size;
+            if (len > cols) len = cols;
+            term_write(e->lines[i].chars, e->lines[i].size);
         }
 
         term_write("\x1b[K", 3);

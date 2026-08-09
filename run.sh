@@ -6,4 +6,4 @@ output="bin/editor"
 
 
 gcc $flags $files -o $output \
-    && ./$output
+    && ./$output $*

@@ -9,11 +9,23 @@ typedef struct {
 } Cursor;
 
 typedef struct {
+    i32 size;
+    char* chars;
+} Line;
+
+typedef struct {
     Cursor cursor;
+
+    bool running;
+
+    i32 num_lines;
+    Line* lines;
 } Editor;
 
 void editor_init(Editor* e);
 void editor_shutdown(Editor* e);
+
+void editor_open(Editor* e, const char* filepath);
 
 void editor_dispatch(Editor* e, Event ev);
 void editor_render(Editor* e);

@@ -35,12 +35,15 @@ i32 term_init(void) {
 
     atexit(term_shutdown);
     term_writef("\x1b[?1049h");
+    term_flush();
     
     return 0;
 }
 
 void term_shutdown(void) {
+    term_clear();
     term_flush();
+
     if (!raw_active) return;
     tcsetattr(STDIN_FILENO, TCSAFLUSH, &orig);
     raw_active = 0;
