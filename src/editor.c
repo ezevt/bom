@@ -6,10 +6,18 @@
 
 #define V_MARGIN 8
 
-static void editor_append_line(Editor* e, char* s, size_t len) {
+static void editor_append_line(Editor* e, char* s, i32 len, i32 at) {
+    if (at < 0) at = 0;
+    if (at > e->num_lines) at = e->num_lines;
+
     e->lines = realloc(e->lines, sizeof(Line) * (e->num_lines + 1));
 
-    int at = e->num_lines;
+    if (at != e->num_lines)
+        memmove(e->lines + at + 1,
+                e->lines + at,
+                (e->num_lines - at) * sizeof(Line));
+
+
     e->lines[at].size = len;
     e->lines[at].chars = malloc(len + 1);
     memcpy(e->lines[at].chars, s, len);
@@ -32,7 +40,7 @@ void editor_open(Editor* e, const char* filepath) {
                                line[linelen - 1] == '\r'))
             linelen--;
 
-        editor_append_line(e, line, linelen);
+        editor_append_line(e, line, linelen, e->num_lines);
     }
 
     free(line);
@@ -47,6 +55,8 @@ void editor_init(Editor* e) {
 
     e->row_offset = 0;
     e->col_offset = 0;
+
+    e->filename = "[No Name]";
     
     term_get_size(&e->rows, &e->cols);
 }
@@ -59,6 +69,9 @@ void editor_shutdown(Editor* e) {
     }
 
     free(e->lines);
+
+    e->lines = NULL;
+    e->num_lines = 0;
 }
 
 static void editor_scroll(Editor* e) {
@@ -86,8 +99,7 @@ static void editor_scroll(Editor* e) {
         e->col_offset = e->cursor.col - e->cols + 1;
     }
 
-    if (e->col_offset < 0)
-        e->col_offset = 0;
+    if (e->col_offset < 0) e->col_offset = 0;
 }
 
 static i32 line_len(Editor* e, i32 line) {
@@ -102,6 +114,63 @@ static void cursor_clamp_col(Editor* e) {
     if (e->cursor.col < 0)   e->cursor.col = 0;
 }
 
+static void line_insert_char(Line* line, i32 col, i32 c) {
+    char* new = realloc(line->chars, line->size + 2);
+
+    memmove(new + col + 1,
+            new + col,
+            line->size - col + 1);
+
+    new[col] = c;
+    line->chars = new;
+    line->size++;
+}
+
+static void line_remove_char(Line* line, i32 col) {
+    memmove(line->chars + col - 1,
+            line->chars + col,
+            line->size - col + 1);
+
+    line->chars[line->size--] = '\0';
+}
+
+static void line_merge(Editor* e, i32 line) {
+    if (line <= 0 || line >= e->num_lines) return;
+
+    Line* l1 = &e->lines[line-1];
+    Line* l2 = &e->lines[line];
+
+    i32 len = l1->size + l2->size;
+    char* new = realloc(l1->chars, len + 1);
+    if (!new) return;
+
+    memcpy(new + l1->size, l2->chars, l2->size);
+    new[len] = '\0';
+
+    l1->chars = new;
+    l1->size  = len;
+
+    free(l2->chars);
+
+    memmove(&e->lines[line], &e->lines[line+1],
+            (e->num_lines - line - 1) * sizeof(Line));
+
+    e->num_lines--;
+}
+
+static void insert_char(Editor* e, i32 c) {
+    
+    i32 row = e->cursor.line;
+    i32 col = e->cursor.col;
+
+    if (row >= e->num_lines) {
+        while (row >= e->num_lines) editor_append_line(e, "", 0, e->num_lines);
+    }
+    
+    line_insert_char(&e->lines[row], col, c);
+    e->cursor.col++;
+}
+
 void editor_dispatch(Editor* e, Event ev) {
     if (ev.type != EV_KEY) return;
     if (ev.key.mods == MOD_CTRL) {
@@ -109,7 +178,6 @@ void editor_dispatch(Editor* e, Event ev) {
             e->running = false;
         }
         
-        return;
     }
 
     switch (ev.key.code) {
@@ -120,7 +188,7 @@ void editor_dispatch(Editor* e, Event ev) {
             }
             break;
         case KEY_DOWN:
-            if (e->cursor.line < e->num_lines) {
+            if (e->cursor.line < e->num_lines - 1) {
                 e->cursor.line++;
                 cursor_clamp_col(e);
             }
@@ -145,6 +213,37 @@ void editor_dispatch(Editor* e, Event ev) {
             e->cursor.goal_col = e->cursor.col;
             break;
         }
+        case 'h':
+            if (ev.key.mods != MOD_CTRL) {
+                insert_char(e, ev.key.code);
+                break;
+            }
+        case KEY_BACKSPACE:
+            if (e->cursor.col > 0) {
+                line_remove_char(&e->lines[e->cursor.line], e->cursor.col);
+                e->cursor.col--;
+            } else if (e->cursor.line > 0) {
+                line_merge(e, e->cursor.line);
+                e->cursor.line--;
+                e->cursor.col = line_len(e, e->cursor.line);
+                e->cursor.goal_col = e->cursor.col;
+            }
+            break;
+        case KEY_DEL:
+            if (e->cursor.col < line_len(e, e->cursor.line)) {
+                line_remove_char(&e->lines[e->cursor.line], e->cursor.col+1);
+            } else if (e->cursor.line < e->num_lines - 1) {
+                line_merge(e, e->cursor.line+1);
+            }
+            break;
+        case KEY_ENTER:
+            editor_append_line(e, "", 0, e->cursor.line+1);
+            e->cursor.line++;
+            cursor_clamp_col(e);
+            break;
+        default:
+            insert_char(e, ev.key.code);
+            break;
     }
 
     editor_scroll(e);
@@ -152,7 +251,7 @@ void editor_dispatch(Editor* e, Event ev) {
 
 static void draw_rows(Editor* e) {
 
-    for (i32 i = 0; i < e->rows; i++) {
+    for (i32 i = 0; i < e->rows-1; i++) {
         i32 file_row = i + e->row_offset;
 
         if (file_row >= e->num_lines) {
@@ -169,8 +268,9 @@ static void draw_rows(Editor* e) {
             }
         }
 
-        term_writef("\x1b[K");
-        term_writef("\r\n");
+        term_write("\x1b[39m",5);
+        term_write("\x1b[0K",4);
+        term_write("\r\n",2);
     }
 
     term_writef("\x1b[0K");
@@ -189,7 +289,7 @@ static void draw_rows(Editor* e) {
             len++;
         }
     }
-    term_writef("\x1b[0m\r\n");
+    term_writef("\x1b[0m");
 }
 
 void editor_render(Editor* e) {

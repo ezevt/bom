@@ -17,8 +17,8 @@ enum { MOD_CTRL = 1, MOD_ALT = 2, MOD_SHIFT = 4 };
 typedef enum { EV_NONE, EV_KEY } EventType;
 
 typedef struct {
-    b32 code; // rune or KEY_*
-    b8 mods;
+    i32 code; // rune or KEY_*
+    i8 mods;
 } Key;
 
 typedef struct {
