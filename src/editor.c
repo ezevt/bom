@@ -18,6 +18,8 @@ static void editor_append_line(Editor* e, char* s, size_t len) {
 }
 
 void editor_open(Editor* e, const char* filepath) {
+    e->filename = filepath;
+
     FILE* fp = fopen(filepath, "r");
     if (!fp) return;
 
@@ -167,11 +169,27 @@ static void draw_rows(Editor* e) {
             }
         }
 
-        term_write("\x1b[K", 3);
-        if (i < e->rows - 1) {
-            term_write("\r\n", 2);
+        term_writef("\x1b[K");
+        term_writef("\r\n");
+    }
+
+    term_writef("\x1b[0K");
+    term_writef("\x1b[7m");
+    char status[80], rstatus[80];
+    int len = snprintf(status, sizeof(status), "%.20s - %d lines", e->filename, e->num_lines);
+    int rlen = snprintf(rstatus, sizeof(rstatus), "%d,%d", e->row_offset+e->cursor.line+1, e->num_lines);
+    if (len > e->cols) len = e->cols;
+    term_write(status, len);
+    while(len < e->cols) {
+        if (e->cols - len == rlen) {
+            term_write(rstatus, rlen);
+            break;
+        } else {
+            term_write(" ", 1);
+            len++;
         }
     }
+    term_writef("\x1b[0m\r\n");
 }
 
 void editor_render(Editor* e) {

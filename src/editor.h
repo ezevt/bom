@@ -24,6 +24,8 @@ typedef struct {
 
     i32 rows, cols;
 
+    const char* filename;
+
     i32 num_lines;
     Line* lines;
 } Editor;
