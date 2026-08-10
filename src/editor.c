@@ -3,6 +3,8 @@
 #include "term.h"
 #include <stdio.h>
 #include <string.h>
+#include <fcntl.h>
+#include <unistd.h>
 
 #define V_MARGIN 8
 
@@ -171,13 +173,47 @@ static void insert_char(Editor* e, i32 c) {
     e->cursor.col++;
 }
 
+static char* lines_to_string(Line* lines, i32 num_lines) {
+    i32 len = 0;
+    for (i32 i = 0; i < num_lines; i++) {
+        len += lines[i].size;
+    }
+
+    char* buf = malloc(len+1);
+    
+    i32 idx = 0;
+    for (i32 i = 0; i < num_lines; i++) {
+        memcpy(buf+idx, lines[i].chars, lines[i].size);
+        idx += lines[i].size;
+    }
+
+    buf[len] = '\0';
+
+    return buf;
+}
+
+static void save_file(Editor* e) {
+    char* buf = lines_to_string(e->lines, e->num_lines);
+
+    int fd = open(e->filename, O_RDWR|O_CREAT, 0644);
+
+    ftruncate(fd, 0);
+    write(fd, buf, strlen(buf));
+
+    close(fd);
+    free(buf);
+}
+
 void editor_dispatch(Editor* e, Event ev) {
     if (ev.type != EV_KEY) return;
     if (ev.key.mods == MOD_CTRL) {
         if (ev.key.code == 'q') {
             e->running = false;
         }
-        
+
+        if (ev.key.code == 'w') {
+            save_file(e);
+        }
     }
 
     switch (ev.key.code) {
