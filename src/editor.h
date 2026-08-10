@@ -5,7 +5,9 @@
 #include "term.h"
 
 typedef struct {
-    i32 x, y;
+    i32 line;
+    i32 col;
+    i32 goal_col;
 } Cursor;
 
 typedef struct {
@@ -17,7 +19,8 @@ typedef struct {
     b8 running;
 
     Cursor cursor;
-    i32 offset;
+    i32 row_offset;
+    i32 col_offset;
 
     i32 rows, cols;
 

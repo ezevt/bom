@@ -39,11 +39,12 @@ void editor_open(Editor* e, const char* filepath) {
 
 void editor_init(Editor* e) {
     e->running = true;
-    e->cursor = (Cursor){0, 0};
+    e->cursor = (Cursor){0, 0, 0};
     e->num_lines = 0;
     e->lines = NULL;
 
-    e->offset = 0;
+    e->row_offset = 0;
+    e->col_offset = 0;
     
     term_get_size(&e->rows, &e->cols);
 }
@@ -52,7 +53,7 @@ void editor_shutdown(Editor* e) {
     if (e->num_lines <= 0) return;
 
     for (i32 i = 0; i < e->num_lines; i++) {
-        free(e->lines[i].chars);
+        free(e->lines[i].chars);            
     }
 
     free(e->lines);
@@ -64,16 +65,39 @@ static void editor_scroll(Editor* e) {
     if (margin * 2 >= e->rows)
         margin = e->rows / 2;
 
-    if (e->cursor.y < e->offset + margin) {
-        e->offset = e->cursor.y - margin;
+    if (e->cursor.line < e->row_offset + margin) {
+        e->row_offset = e->cursor.line - margin;
     }
 
-    if (e->cursor.y >= e->offset + e->rows - margin) {
-        e->offset = e->cursor.y - e->rows + margin + 1;
+    if (e->cursor.line >= e->row_offset + e->rows - margin) {
+        e->row_offset = e->cursor.line - e->rows + margin + 1;
     }
 
-    if (e->offset < 0)
-        e->offset = 0;
+    if (e->row_offset < 0)
+        e->row_offset = 0;
+
+    if (e->cursor.col < e->col_offset) {
+        e->col_offset = e->cursor.col;
+    }
+
+    if (e->cursor.col >= e->col_offset + e->cols) {
+        e->col_offset = e->cursor.col - e->cols + 1;
+    }
+
+    if (e->col_offset < 0)
+        e->col_offset = 0;
+}
+
+static i32 line_len(Editor* e, i32 line) {
+    if (line < 0 || line >= e->num_lines) return 0;
+    return e->lines[line].size;
+}
+
+static void cursor_clamp_col(Editor* e) {
+    i32 len = line_len(e, e->cursor.line);
+    e->cursor.col = e->cursor.goal_col;
+    if (e->cursor.col > len) e->cursor.col = len;
+    if (e->cursor.col < 0)   e->cursor.col = 0;
 }
 
 void editor_dispatch(Editor* e, Event ev) {
@@ -88,19 +112,37 @@ void editor_dispatch(Editor* e, Event ev) {
 
     switch (ev.key.code) {
         case KEY_UP:
-            if (e->cursor.y > 0)
-                e->cursor.y--;
+            if (e->cursor.line > 0) {
+                e->cursor.line--;
+                cursor_clamp_col(e);
+            }
             break;
         case KEY_DOWN:
-            if (e->cursor.y < e->num_lines)
-                e->cursor.y++;
+            if (e->cursor.line < e->num_lines) {
+                e->cursor.line++;
+                cursor_clamp_col(e);
+            }
             break;
         case KEY_LEFT:
-            e->cursor.x--;
+            if (e->cursor.col > 0) {
+                e->cursor.col--;
+            } else if (e->cursor.line > 0) {
+                e->cursor.line--;
+                e->cursor.col = line_len(e, e->cursor.line);
+            }
+            e->cursor.goal_col = e->cursor.col;
             break;
-        case KEY_RIGHT:
-            e->cursor.x++;
+        case KEY_RIGHT: {
+            i32 len = line_len(e, e->cursor.line);
+            if (e->cursor.col < len) {
+                e->cursor.col++;
+            } else if (e->cursor.line < e->num_lines - 1) {
+                e->cursor.line++;
+                e->cursor.col = 0;
+            }
+            e->cursor.goal_col = e->cursor.col;
             break;
+        }
     }
 
     editor_scroll(e);
@@ -109,7 +151,8 @@ void editor_dispatch(Editor* e, Event ev) {
 static void draw_rows(Editor* e) {
 
     for (i32 i = 0; i < e->rows; i++) {
-        i32 file_row = i + e->offset;
+        i32 file_row = i + e->row_offset;
+
         if (file_row >= e->num_lines) {
             if (e->num_lines == 0 && i == e->rows/3) {
                 term_writef("BOM - version %s", BOM_VERSION);
@@ -117,9 +160,11 @@ static void draw_rows(Editor* e) {
                 term_write("~", 1);
             }
         } else {
-            int len = e->lines[file_row].size;
-            if (len > e->cols) len = e->cols;
-            term_write(e->lines[file_row].chars, e->lines[file_row].size);
+            int len = e->lines[file_row].size - e->col_offset;
+            if (len > 0) {
+                if (len > e->cols) len = e->cols;
+                term_write(e->lines[file_row].chars + e->col_offset, len);
+            }
         }
 
         term_write("\x1b[K", 3);
@@ -135,7 +180,7 @@ void editor_render(Editor* e) {
 
     draw_rows(e);
 
-    i32 screen_y = e->cursor.y - e->offset;
+    i32 screen_y = e->cursor.line - e->row_offset;
 
     if (screen_y < 0)
         screen_y = 0;
@@ -143,7 +188,7 @@ void editor_render(Editor* e) {
     if (screen_y >= e->rows)
         screen_y = e->rows - 1;
 
-    i32 screen_x = e->cursor.x;
+    i32 screen_x = e->cursor.col - e->col_offset;
 
     if (screen_x < 0)
         screen_x = 0;
