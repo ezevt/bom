@@ -3,6 +3,7 @@
 
 #include "defs.h"
 #include "term.h"
+#include "rect.h"
 
 typedef struct {
     i32 line;
@@ -16,6 +17,12 @@ typedef struct {
 } Line;
 
 typedef struct {
+    Rect text;
+    Rect status;
+    Rect cmd;
+} Layout;
+
+typedef struct {
     b8 running;
 
     Cursor cursor;
@@ -23,6 +30,7 @@ typedef struct {
     i32 col_offset;
 
     i32 rows, cols;
+    Layout layout;
 
     const char* filename;
 

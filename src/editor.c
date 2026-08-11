@@ -49,6 +49,15 @@ void editor_open(Editor* e, const char* filepath) {
     fclose(fp);
 }
 
+static Layout editor_layout(Editor* e) {
+    Rect full = { 0, 0, e->cols, e->rows };
+    Layout l;
+    l.cmd = rect_cut_bottom(&full, 1);
+    l.status = rect_cut_bottom(&full, 1);
+    l.text = full;
+    return l;
+}
+
 void editor_init(Editor* e) {
     e->running = true;
     e->cursor = (Cursor){0, 0, 0};
@@ -61,6 +70,8 @@ void editor_init(Editor* e) {
     e->filename = "[No Name]";
     
     term_get_size(&e->rows, &e->cols);
+
+    e->layout = editor_layout(e);
 }
 
 void editor_shutdown(Editor* e) {
@@ -76,18 +87,18 @@ void editor_shutdown(Editor* e) {
     e->num_lines = 0;
 }
 
-static void editor_scroll(Editor* e) {
+static void editor_scroll(Editor* e, Rect view) {
     i32 margin = V_MARGIN;
 
-    if (margin * 2 >= e->rows)
-        margin = e->rows / 2;
+    if (margin * 2 >= view.h)
+        margin = view.h / 2;
 
     if (e->cursor.line < e->row_offset + margin) {
         e->row_offset = e->cursor.line - margin;
     }
 
-    if (e->cursor.line >= e->row_offset + e->rows - margin) {
-        e->row_offset = e->cursor.line - e->rows + margin + 1;
+    if (e->cursor.line >= e->row_offset + view.h - margin) {
+        e->row_offset = e->cursor.line - view.h + margin + 1;
     }
 
     if (e->row_offset < 0)
@@ -97,8 +108,8 @@ static void editor_scroll(Editor* e) {
         e->col_offset = e->cursor.col;
     }
 
-    if (e->cursor.col >= e->col_offset + e->cols) {
-        e->col_offset = e->cursor.col - e->cols + 1;
+    if (e->cursor.col >= e->col_offset + view.w) {
+        e->col_offset = e->cursor.col - view.w + 1;
     }
 
     if (e->col_offset < 0) e->col_offset = 0;
@@ -287,16 +298,17 @@ void editor_dispatch(Editor* e, Event ev) {
             break;
     }
 
-    editor_scroll(e);
+    editor_scroll(e, e->layout.text);
 }
 
-static void draw_rows(Editor* e) {
+static void draw_text(Editor* e, Rect view) {
+    for (i32 i = 0; i < view.h; i++) {
+        term_move_cursor(view.y+i, view.x);
 
-    for (i32 i = 0; i < e->rows-1; i++) {
         i32 file_row = i + e->row_offset;
 
         if (file_row >= e->num_lines) {
-            if (e->num_lines == 0 && i == e->rows/3) {
+            if (e->num_lines == 0 && i == view.h/3) {
                 term_writef("BOM - version %s", BOM_VERSION);
             } else {
                 term_write("~", 1);
@@ -304,7 +316,7 @@ static void draw_rows(Editor* e) {
         } else {
             int len = e->lines[file_row].size - e->col_offset;
             if (len > 0) {
-                if (len > e->cols) len = e->cols;
+                if (len > view.w) len = view.w;
                 term_write(e->lines[file_row].chars + e->col_offset, len);
             }
         }
@@ -313,7 +325,10 @@ static void draw_rows(Editor* e) {
         term_write("\x1b[0K",4);
         term_write("\r\n",2);
     }
+}
 
+static void draw_status(Editor* e, Rect view) {
+    term_move_cursor(view.y, view.x);
     term_writef("\x1b[0K");
     term_writef("\x1b[7m");
     char status[80], rstatus[80];
@@ -335,9 +350,9 @@ static void draw_rows(Editor* e) {
 
 void editor_render(Editor* e) {
     term_cursor_hide();
-    term_move_cursor(0, 0);
 
-    draw_rows(e);
+    draw_text(e, e->layout.text);
+    draw_status(e, e->layout.status);
 
     i32 screen_y = e->cursor.line - e->row_offset;
 
