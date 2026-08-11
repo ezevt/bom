@@ -69,116 +69,124 @@ static void view_scroll(View* v, Rect r) {
     scroll_track(&v->col_offset, v->cursor.col, r.w, 0);
 }
 
-static void cursor_clamp_col(Editor* e) {
-    i32 len = line_len(&e->buffer, e->view.cursor.line);
-    e->view.cursor.col = e->view.cursor.goal_col;
-    if (e->view.cursor.col > len) e->view.cursor.col = len;
-    if (e->view.cursor.col < 0)   e->view.cursor.col = 0;
+static void cursor_clamp_col(View* v) {
+    i32 len = line_len(v->buf, v->cursor.line);
+    v->cursor.col = v->cursor.goal_col;
+    if (v->cursor.col > len) v->cursor.col = len;
+    if (v->cursor.col < 0)   v->cursor.col = 0;
 }
 
-void editor_dispatch(Editor* e, Event ev) {
+static void view_dispatch(View* v, Event ev, Rect r) {
     if (ev.type != EV_KEY) return;
     if (ev.key.mods == MOD_CTRL) {
-        if (ev.key.code == 'q') {
-            e->running = false;
-            return;
-        }
-
         if (ev.key.code == 'w') {
-            buffer_save(&e->buffer);
+            buffer_save(v->buf);
             return;
         }
     }
 
     switch (ev.key.code) {
         case KEY_UP:
-            if (e->view.cursor.line > 0) {
-                e->view.cursor.line--;
-                cursor_clamp_col(e);
+            if (v->cursor.line > 0) {
+                v->cursor.line--;
+                cursor_clamp_col(v);
             }
             break;
         case KEY_DOWN:
-            if (e->view.cursor.line < e->buffer.num_lines - 1) {
-                e->view.cursor.line++;
-                cursor_clamp_col(e);
+            if (v->cursor.line < v->buf->num_lines - 1) {
+                v->cursor.line++;
+                cursor_clamp_col(v);
             }
             break;
         case KEY_LEFT:
-            if (e->view.cursor.col > 0) {
-                e->view.cursor.col--;
-            } else if (e->view.cursor.line > 0) {
-                e->view.cursor.line--;
-                e->view.cursor.col = line_len(&e->buffer, e->view.cursor.line);
+            if (v->cursor.col > 0) {
+                v->cursor.col--;
+            } else if (v->cursor.line > 0) {
+                v->cursor.line--;
+                v->cursor.col = line_len(v->buf, v->cursor.line);
             }
-            e->view.cursor.goal_col = e->view.cursor.col;
+            v->cursor.goal_col = v->cursor.col;
             break;
         case KEY_RIGHT: {
-            i32 len = line_len(&e->buffer, e->view.cursor.line);
-            if (e->view.cursor.col < len) {
-                e->view.cursor.col++;
-            } else if (e->view.cursor.line < e->buffer.num_lines - 1) {
-                e->view.cursor.line++;
-                e->view.cursor.col = 0;
+            i32 len = line_len(v->buf, v->cursor.line);
+            if (v->cursor.col < len) {
+                v->cursor.col++;
+            } else if (v->cursor.line < v->buf->num_lines - 1) {
+                v->cursor.line++;
+                v->cursor.col = 0;
             }
-            e->view.cursor.goal_col = e->view.cursor.col;
+            v->cursor.goal_col = v->cursor.col;
             break;
         }
         case 'h':
             if (ev.key.mods != MOD_CTRL) {
-                buffer_insert_char(&e->buffer, e->view.cursor.line, e->view.cursor.col, ev.key.code);
-                e->view.cursor.col++;
+                buffer_insert_char(v->buf, v->cursor.line, v->cursor.col, ev.key.code);
+                v->cursor.col++;
                 break;
             }
+            /* fall through */
         case KEY_BACKSPACE:
-            if (e->view.cursor.col > 0) {
-                buffer_remove_char(&e->buffer, e->view.cursor.line, e->view.cursor.col);
-                e->view.cursor.col--;
-            } else if (e->view.cursor.line > 0) {
-                e->view.cursor.line--;
-                e->view.cursor.col = line_len(&e->buffer, e->view.cursor.line);
-                e->view.cursor.goal_col = e->view.cursor.col;
-                buffer_merge_lines(&e->buffer, e->view.cursor.line+1);
+            if (v->cursor.col > 0) {
+                buffer_remove_char(v->buf, v->cursor.line, v->cursor.col);
+                v->cursor.col--;
+            } else if (v->cursor.line > 0) {
+                v->cursor.line--;
+                v->cursor.col = line_len(v->buf, v->cursor.line);
+                v->cursor.goal_col = v->cursor.col;
+                buffer_merge_lines(v->buf, v->cursor.line+1);
             }
             break;
         case KEY_DEL:
-            if (e->view.cursor.col < line_len(&e->buffer, e->view.cursor.line)) {
-                buffer_remove_char(&e->buffer, e->view.cursor.line, e->view.cursor.col+1);
-            } else if (e->view.cursor.line < e->buffer.num_lines - 1) {
-                buffer_merge_lines(&e->buffer, e->view.cursor.line+1);
+            if (v->cursor.col < line_len(v->buf, v->cursor.line)) {
+                buffer_remove_char(v->buf, v->cursor.line, v->cursor.col+1);
+            } else if (v->cursor.line < v->buf->num_lines - 1) {
+                buffer_merge_lines(v->buf, v->cursor.line+1);
             }
             break;
         case KEY_ENTER:
-            buffer_split_line(&e->buffer, e->view.cursor.line, e->view.cursor.col);
-            e->view.cursor.line++;
-            e->view.cursor.col = 0;
-            e->view.cursor.goal_col = e->view.cursor.goal_col;
+            buffer_split_line(v->buf, v->cursor.line, v->cursor.col);
+            v->cursor.line++;
+            v->cursor.col = 0;
+            v->cursor.goal_col = v->cursor.col;
             break;
         default:
-            buffer_insert_char(&e->buffer, e->view.cursor.line, e->view.cursor.col, ev.key.code);
-            e->view.cursor.col++;
+            buffer_insert_char(v->buf, v->cursor.line, v->cursor.col, ev.key.code);
+            v->cursor.col++;
             break;
     }
 
-    view_scroll(&e->view, e->layout.text);
+    view_scroll(v, r);
 }
 
-static void draw_text(Editor* e, Rect view) {
+void editor_dispatch(Editor* e, Event ev) {
+    if (ev.type     == EV_KEY   &&
+        ev.key.mods == MOD_CTRL &&
+        ev.key.code == 'q'
+        ) {
+        e->running = false;
+        return;
+    }
+
+    view_dispatch(&e->view, ev, e->layout.text);
+}
+
+static void draw_text(View* v, Rect view) {
     for (i32 i = 0; i < view.h; i++) {
         term_move_cursor(view.y+i, view.x);
 
-        i32 file_row = i + e->view.row_offset;
+        i32 file_row = i + v->row_offset;
 
-        if (file_row >= e->buffer.num_lines) {
-            if (e->buffer.num_lines == 0 && i == view.h/3) {
+        if (file_row >= v->buf->num_lines) {
+            if (v->buf->num_lines == 0 && i == view.h/3) {
                 term_writef("BOM - version %s", BOM_VERSION);
             } else {
                 term_write("~", 1);
             }
         } else {
-            int len = e->buffer.lines[file_row].size - e->view.col_offset;
+            int len = v->buf->lines[file_row].size - v->col_offset;
             if (len > 0) {
                 if (len > view.w) len = view.w;
-                term_write(e->buffer.lines[file_row].chars + e->view.col_offset, len);
+                term_write(v->buf->lines[file_row].chars + v->col_offset, len);
             }
         }
 
@@ -188,16 +196,16 @@ static void draw_text(Editor* e, Rect view) {
     }
 }
 
-static void draw_status(Editor* e, Rect view) {
-    term_move_cursor(view.y, view.x);
+static void draw_status(Editor* e, Rect r) {
+    term_move_cursor(r.y, r.x);
     term_writef("\x1b[0K");
     term_writef("\x1b[7m");
     char status[80], rstatus[80];
     int len = snprintf(status, sizeof(status), "%.20s - %d lines", e->buffer.filename, e->buffer.num_lines);
     int rlen = snprintf(rstatus, sizeof(rstatus), "%d,%d", e->view.cursor.line+1, e->buffer.num_lines);
-    if (len > e->cols) len = e->cols;
+    if (len > r.w) len = r.w;
     term_write(status, len);
-    while(len < e->cols) {
+    while(len < r.w) {
         if (e->cols - len == rlen) {
             term_write(rstatus, rlen);
             break;
@@ -212,7 +220,7 @@ static void draw_status(Editor* e, Rect view) {
 void editor_render(Editor* e) {
     term_cursor_hide();
 
-    draw_text(e, e->layout.text);
+    draw_text(&e->view, e->layout.text);
     draw_status(e, e->layout.status);
 
     i32 screen_y = e->view.cursor.line - e->view.row_offset;

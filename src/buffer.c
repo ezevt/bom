@@ -114,7 +114,7 @@ void buffer_insert_char(Buffer* b, i32 line, i32 col, i32 c) {
 }
 
 void buffer_remove_char(Buffer* b, i32 line, i32 col) {
-    if (line < 0 || line >= b->num_lines) return;
+    if (line < 0 || line > b->num_lines) return;
 
     Line* l = &b->lines[line];
 
@@ -160,6 +160,8 @@ void buffer_split_line(Buffer *b, i32 line, i32 col) {
     i32 len = line_len(b, line)-col;
 
     buffer_append_line(b, l->chars+col, len, line+1);
+    
+    l = &b->lines[line];
     l->size -= len;
     l->chars[l->size] = '\0';
 }
