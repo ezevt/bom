@@ -10,25 +10,25 @@
 
 static void editor_append_line(Editor* e, char* s, i32 len, i32 at) {
     if (at < 0) at = 0;
-    if (at > e->num_lines) at = e->num_lines;
+    if (at > e->buffer.num_lines) at = e->buffer.num_lines;
 
-    e->lines = realloc(e->lines, sizeof(Line) * (e->num_lines + 1));
+    e->buffer.lines = realloc(e->buffer.lines, sizeof(Line) * (e->buffer.num_lines + 1));
 
-    if (at != e->num_lines)
-        memmove(e->lines + at + 1,
-                e->lines + at,
-                (e->num_lines - at) * sizeof(Line));
+    if (at != e->buffer.num_lines)
+        memmove(e->buffer.lines + at + 1,
+                e->buffer.lines + at,
+                (e->buffer.num_lines - at) * sizeof(Line));
 
 
-    e->lines[at].size = len;
-    e->lines[at].chars = malloc(len + 1);
-    memcpy(e->lines[at].chars, s, len);
-    e->lines[at].chars[len] = '\0';
-    e->num_lines++;
+    e->buffer.lines[at].size = len;
+    e->buffer.lines[at].chars = malloc(len + 1);
+    memcpy(e->buffer.lines[at].chars, s, len);
+    e->buffer.lines[at].chars[len] = '\0';
+    e->buffer.num_lines++;
 }
 
 void editor_open(Editor* e, const char* filepath) {
-    e->filename = filepath;
+    e->buffer.filename = filepath;
 
     FILE* fp = fopen(filepath, "r");
     if (!fp) return;
@@ -42,7 +42,7 @@ void editor_open(Editor* e, const char* filepath) {
                                line[linelen - 1] == '\r'))
             linelen--;
 
-        editor_append_line(e, line, linelen, e->num_lines);
+        editor_append_line(e, line, linelen, e->buffer.num_lines);
     }
 
     free(line);
@@ -60,71 +60,72 @@ static Layout editor_layout(Editor* e) {
 
 void editor_init(Editor* e) {
     e->running = true;
-    e->cursor = (Cursor){0, 0, 0};
-    e->num_lines = 0;
-    e->lines = NULL;
 
-    e->row_offset = 0;
-    e->col_offset = 0;
+    e->buffer = (Buffer) {
+        .filename = "[No Name]",
+        .num_lines = 0,
+        .lines = NULL,
+    };
 
-    e->filename = "[No Name]";
-    
+    e->view = (View){
+        .buf = &e->buffer,
+        .cursor = (Cursor){0, 0, 0},
+        .row_offset = 0,
+        .col_offset = 0,
+    };
+
     term_get_size(&e->rows, &e->cols);
-
     e->layout = editor_layout(e);
 }
 
 void editor_shutdown(Editor* e) {
-    if (e->num_lines <= 0) return;
 
-    for (i32 i = 0; i < e->num_lines; i++) {
-        free(e->lines[i].chars);            
+    if (e->buffer.num_lines > 0) {
+        for (i32 i = 0; i < e->buffer.num_lines; i++) {
+            free(e->buffer.lines[i].chars);            
+        }
     }
 
-    free(e->lines);
-
-    e->lines = NULL;
-    e->num_lines = 0;
+    if (e->buffer.lines != NULL) {
+        free(e->buffer.lines);
+        e->buffer.lines = NULL;
+        e->buffer.num_lines = 0;
+    }
 }
 
-static void editor_scroll(Editor* e, Rect view) {
+static void scroll_track(i32* offset, i32 cursor, i32 size, i32 margin) {
+    if (cursor < *offset + margin) {
+        *offset = cursor - margin;
+    }
+
+    if (cursor >= *offset + size - margin) {
+        *offset = cursor - size + margin + 1;
+    }
+
+    if (*offset < 0)
+        *offset = 0;
+}
+
+static void editor_scroll(Editor* e, View* v, Rect r) {
     i32 margin = V_MARGIN;
 
-    if (margin * 2 >= view.h)
-        margin = view.h / 2;
+    if (margin * 2 >= r.h)
+        margin = r.h / 2;
 
-    if (e->cursor.line < e->row_offset + margin) {
-        e->row_offset = e->cursor.line - margin;
-    }
-
-    if (e->cursor.line >= e->row_offset + view.h - margin) {
-        e->row_offset = e->cursor.line - view.h + margin + 1;
-    }
-
-    if (e->row_offset < 0)
-        e->row_offset = 0;
-
-    if (e->cursor.col < e->col_offset) {
-        e->col_offset = e->cursor.col;
-    }
-
-    if (e->cursor.col >= e->col_offset + view.w) {
-        e->col_offset = e->cursor.col - view.w + 1;
-    }
-
-    if (e->col_offset < 0) e->col_offset = 0;
+    scroll_track(&v->row_offset, v->cursor.line, r.h, margin);
+    scroll_track(&v->col_offset, v->cursor.col, r.w, 0);
 }
 
-static i32 line_len(Editor* e, i32 line) {
-    if (line < 0 || line >= e->num_lines) return 0;
-    return e->lines[line].size;
+static i32 line_len(Buffer* b, i32 line) {
+    if (line < 0 || line >= b->num_lines) return 0;
+    return b->lines[line].size;
 }
 
 static void cursor_clamp_col(Editor* e) {
-    i32 len = line_len(e, e->cursor.line);
-    e->cursor.col = e->cursor.goal_col;
-    if (e->cursor.col > len) e->cursor.col = len;
-    if (e->cursor.col < 0)   e->cursor.col = 0;
+    i32 len = line_len(&e->buffer, e->view.cursor.line);
+    e->view.cursor.col = e->view.cursor.goal_col;
+    if (e->view.cursor.col > len) e->view.cursor.col = len;
+    if (e->view.cursor.col < 0)   e->view.cursor.col = 0;
 }
 
 static void line_insert_char(Line* line, i32 col, i32 c) {
@@ -143,16 +144,18 @@ static void line_insert_char(Line* line, i32 col, i32 c) {
 }
 
 static void line_remove_char(Line* line, i32 col) {
+    if (col <= 0 || col >= line->size) return;
     memmove(line->chars + col - 1,
             line->chars + col,
             line->size - col + 1);
+    line->size--;
 }
 
 static void line_merge(Editor* e, i32 line) {
-    if (line <= 0 || line >= e->num_lines) return;
+    if (line <= 0 || line >= e->buffer.num_lines) return;
 
-    Line* l1 = &e->lines[line-1];
-    Line* l2 = &e->lines[line];
+    Line* l1 = &e->buffer.lines[line-1];
+    Line* l2 = &e->buffer.lines[line];
 
     i32 len = l1->size + l2->size;
     char* new = realloc(l1->chars, len + 1);
@@ -166,24 +169,24 @@ static void line_merge(Editor* e, i32 line) {
 
     free(l2->chars);
 
-    memmove(&e->lines[line], &e->lines[line+1],
-            (e->num_lines - line - 1) * sizeof(Line));
+    memmove(&e->buffer.lines[line], &e->buffer.lines[line+1],
+            (e->buffer.num_lines - line - 1) * sizeof(Line));
 
-    e->num_lines--;
+    e->buffer.num_lines--;
 }
 
 static void insert_char(Editor* e, i32 c) {
     
-    i32 row = e->cursor.line;
-    i32 col = e->cursor.col;
+    i32 row = e->view.cursor.line;
+    i32 col = e->view.cursor.col;
 
-    if (row >= e->num_lines) {
-        while (row >= e->num_lines) editor_append_line(e, "", 0, e->num_lines);
+    if (row >= e->buffer.num_lines) {
+        while (row >= e->buffer.num_lines) editor_append_line(e, "", 0, e->buffer.num_lines);
     }
     
-    line_insert_char(&e->lines[row], col, c);
-    e->cursor.col++;
-    e->cursor.goal_col = e->cursor.col;
+    line_insert_char(&e->buffer.lines[row], col, c);
+    e->view.cursor.col++;
+    e->view.cursor.goal_col = e->view.cursor.col;
 }
 
 static char* lines_to_string(Line* lines, i32 num_lines) {
@@ -207,9 +210,9 @@ static char* lines_to_string(Line* lines, i32 num_lines) {
 }
 
 static void save_file(Editor* e) {
-    char* buf = lines_to_string(e->lines, e->num_lines);
+    char* buf = lines_to_string(e->buffer.lines, e->buffer.num_lines);
 
-    int fd = open(e->filename, O_RDWR|O_CREAT, 0644);
+    int fd = open(e->buffer.filename, O_RDWR|O_CREAT, 0644);
 
     ftruncate(fd, 0);
     write(fd, buf, strlen(buf));
@@ -234,35 +237,35 @@ void editor_dispatch(Editor* e, Event ev) {
 
     switch (ev.key.code) {
         case KEY_UP:
-            if (e->cursor.line > 0) {
-                e->cursor.line--;
+            if (e->view.cursor.line > 0) {
+                e->view.cursor.line--;
                 cursor_clamp_col(e);
             }
             break;
         case KEY_DOWN:
-            if (e->cursor.line < e->num_lines - 1) {
-                e->cursor.line++;
+            if (e->view.cursor.line < e->buffer.num_lines - 1) {
+                e->view.cursor.line++;
                 cursor_clamp_col(e);
             }
             break;
         case KEY_LEFT:
-            if (e->cursor.col > 0) {
-                e->cursor.col--;
-            } else if (e->cursor.line > 0) {
-                e->cursor.line--;
-                e->cursor.col = line_len(e, e->cursor.line);
+            if (e->view.cursor.col > 0) {
+                e->view.cursor.col--;
+            } else if (e->view.cursor.line > 0) {
+                e->view.cursor.line--;
+                e->view.cursor.col = line_len(&e->buffer, e->view.cursor.line);
             }
-            e->cursor.goal_col = e->cursor.col;
+            e->view.cursor.goal_col = e->view.cursor.col;
             break;
         case KEY_RIGHT: {
-            i32 len = line_len(e, e->cursor.line);
-            if (e->cursor.col < len) {
-                e->cursor.col++;
-            } else if (e->cursor.line < e->num_lines - 1) {
-                e->cursor.line++;
-                e->cursor.col = 0;
+            i32 len = line_len(&e->buffer, e->view.cursor.line);
+            if (e->view.cursor.col < len) {
+                e->view.cursor.col++;
+            } else if (e->view.cursor.line < e->buffer.num_lines - 1) {
+                e->view.cursor.line++;
+                e->view.cursor.col = 0;
             }
-            e->cursor.goal_col = e->cursor.col;
+            e->view.cursor.goal_col = e->view.cursor.col;
             break;
         }
         case 'h':
@@ -271,26 +274,26 @@ void editor_dispatch(Editor* e, Event ev) {
                 break;
             }
         case KEY_BACKSPACE:
-            if (e->cursor.col > 0) {
-                line_remove_char(&e->lines[e->cursor.line], e->cursor.col);
-                e->cursor.col--;
-            } else if (e->cursor.line > 0) {
-                line_merge(e, e->cursor.line);
-                e->cursor.line--;
-                e->cursor.col = line_len(e, e->cursor.line);
-                e->cursor.goal_col = e->cursor.col;
+            if (e->view.cursor.col > 0) {
+                line_remove_char(&e->buffer.lines[e->view.cursor.line], e->view.cursor.col);
+                e->view.cursor.col--;
+            } else if (e->view.cursor.line > 0) {
+                e->view.cursor.line--;
+                e->view.cursor.col = line_len(&e->buffer, e->view.cursor.line);
+                e->view.cursor.goal_col = e->view.cursor.col;
+                line_merge(e, e->view.cursor.line+1);
             }
             break;
         case KEY_DEL:
-            if (e->cursor.col < line_len(e, e->cursor.line)) {
-                line_remove_char(&e->lines[e->cursor.line], e->cursor.col+1);
-            } else if (e->cursor.line < e->num_lines - 1) {
-                line_merge(e, e->cursor.line+1);
+            if (e->view.cursor.col < line_len(&e->buffer, e->view.cursor.line)) {
+                line_remove_char(&e->buffer.lines[e->view.cursor.line], e->view.cursor.col+1);
+            } else if (e->view.cursor.line < e->buffer.num_lines - 1) {
+                line_merge(e, e->view.cursor.line+1);
             }
             break;
         case KEY_ENTER:
-            editor_append_line(e, "", 0, e->cursor.line+1);
-            e->cursor.line++;
+            editor_append_line(e, "", 0, e->view.cursor.line+1);
+            e->view.cursor.line++;
             cursor_clamp_col(e);
             break;
         default:
@@ -298,26 +301,26 @@ void editor_dispatch(Editor* e, Event ev) {
             break;
     }
 
-    editor_scroll(e, e->layout.text);
+    editor_scroll(e, &e->view, e->layout.text);
 }
 
 static void draw_text(Editor* e, Rect view) {
     for (i32 i = 0; i < view.h; i++) {
         term_move_cursor(view.y+i, view.x);
 
-        i32 file_row = i + e->row_offset;
+        i32 file_row = i + e->view.row_offset;
 
-        if (file_row >= e->num_lines) {
-            if (e->num_lines == 0 && i == view.h/3) {
+        if (file_row >= e->buffer.num_lines) {
+            if (e->buffer.num_lines == 0 && i == view.h/3) {
                 term_writef("BOM - version %s", BOM_VERSION);
             } else {
                 term_write("~", 1);
             }
         } else {
-            int len = e->lines[file_row].size - e->col_offset;
+            int len = e->buffer.lines[file_row].size - e->view.col_offset;
             if (len > 0) {
                 if (len > view.w) len = view.w;
-                term_write(e->lines[file_row].chars + e->col_offset, len);
+                term_write(e->buffer.lines[file_row].chars + e->view.col_offset, len);
             }
         }
 
@@ -332,8 +335,8 @@ static void draw_status(Editor* e, Rect view) {
     term_writef("\x1b[0K");
     term_writef("\x1b[7m");
     char status[80], rstatus[80];
-    int len = snprintf(status, sizeof(status), "%.20s - %d lines", e->filename, e->num_lines);
-    int rlen = snprintf(rstatus, sizeof(rstatus), "%d,%d", e->cursor.line+1, e->num_lines);
+    int len = snprintf(status, sizeof(status), "%.20s - %d lines", e->buffer.filename, e->buffer.num_lines);
+    int rlen = snprintf(rstatus, sizeof(rstatus), "%d,%d", e->view.cursor.line+1, e->buffer.num_lines);
     if (len > e->cols) len = e->cols;
     term_write(status, len);
     while(len < e->cols) {
@@ -354,7 +357,7 @@ void editor_render(Editor* e) {
     draw_text(e, e->layout.text);
     draw_status(e, e->layout.status);
 
-    i32 screen_y = e->cursor.line - e->row_offset;
+    i32 screen_y = e->view.cursor.line - e->view.row_offset;
 
     if (screen_y < 0)
         screen_y = 0;
@@ -362,7 +365,7 @@ void editor_render(Editor* e) {
     if (screen_y >= e->rows)
         screen_y = e->rows - 1;
 
-    i32 screen_x = e->cursor.col - e->col_offset;
+    i32 screen_x = e->view.cursor.col - e->view.col_offset;
 
     if (screen_x < 0)
         screen_x = 0;

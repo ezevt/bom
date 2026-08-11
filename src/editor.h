@@ -17,6 +17,21 @@ typedef struct {
 } Line;
 
 typedef struct {
+    i32 num_lines;
+    Line* lines;
+
+    const char* filename;
+} Buffer;
+
+typedef struct {
+    Buffer* buf;
+
+    Cursor cursor;
+    i32 row_offset;
+    i32 col_offset;
+} View;
+
+typedef struct {
     Rect text;
     Rect status;
     Rect cmd;
@@ -25,17 +40,11 @@ typedef struct {
 typedef struct {
     b8 running;
 
-    Cursor cursor;
-    i32 row_offset;
-    i32 col_offset;
-
     i32 rows, cols;
     Layout layout;
-
-    const char* filename;
-
-    i32 num_lines;
-    Line* lines;
+    
+    Buffer buffer;
+    View view;
 } Editor;
 
 void editor_init(Editor* e);
