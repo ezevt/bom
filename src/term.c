@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <termios.h>
 #include <unistd.h>
+#include <errno.h>
 
 static struct termios orig;
 static i32 raw_active = 0;
@@ -243,7 +244,12 @@ void term_writef(const char* fmt, ...) {
 }
 
 void term_flush(void) {
-    write(STDOUT_FILENO, abuf, alen);
+    i32 off = 0;
+    while (off < alen) {
+        ssize_t n = write(STDOUT_FILENO, abuf + off, alen - off);
+        if (n < 0) { if (errno == EINTR) continue; break; }
+        off += n;
+    }
     free(abuf);
     abuf = NULL;
     alen = 0;

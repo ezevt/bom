@@ -117,6 +117,9 @@ static void cursor_clamp_col(Editor* e) {
 }
 
 static void line_insert_char(Line* line, i32 col, i32 c) {
+    if (col > line->size) col = line->size;
+    if (col < 0) col = 0;
+
     char* new = realloc(line->chars, line->size + 2);
 
     memmove(new + col + 1,
@@ -132,8 +135,6 @@ static void line_remove_char(Line* line, i32 col) {
     memmove(line->chars + col - 1,
             line->chars + col,
             line->size - col + 1);
-
-    line->chars[line->size--] = '\0';
 }
 
 static void line_merge(Editor* e, i32 line) {
@@ -171,12 +172,13 @@ static void insert_char(Editor* e, i32 c) {
     
     line_insert_char(&e->lines[row], col, c);
     e->cursor.col++;
+    e->cursor.goal_col = e->cursor.col;
 }
 
 static char* lines_to_string(Line* lines, i32 num_lines) {
     i32 len = 0;
     for (i32 i = 0; i < num_lines; i++) {
-        len += lines[i].size;
+        len += lines[i].size + 1;
     }
 
     char* buf = malloc(len+1);
@@ -185,6 +187,7 @@ static char* lines_to_string(Line* lines, i32 num_lines) {
     for (i32 i = 0; i < num_lines; i++) {
         memcpy(buf+idx, lines[i].chars, lines[i].size);
         idx += lines[i].size;
+        buf[idx++] = '\n';
     }
 
     buf[len] = '\0';
@@ -209,10 +212,12 @@ void editor_dispatch(Editor* e, Event ev) {
     if (ev.key.mods == MOD_CTRL) {
         if (ev.key.code == 'q') {
             e->running = false;
+            return;
         }
 
         if (ev.key.code == 'w') {
             save_file(e);
+            return;
         }
     }
 
@@ -313,7 +318,7 @@ static void draw_rows(Editor* e) {
     term_writef("\x1b[7m");
     char status[80], rstatus[80];
     int len = snprintf(status, sizeof(status), "%.20s - %d lines", e->filename, e->num_lines);
-    int rlen = snprintf(rstatus, sizeof(rstatus), "%d,%d", e->row_offset+e->cursor.line+1, e->num_lines);
+    int rlen = snprintf(rstatus, sizeof(rstatus), "%d,%d", e->cursor.line+1, e->num_lines);
     if (len > e->cols) len = e->cols;
     term_write(status, len);
     while(len < e->cols) {
