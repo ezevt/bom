@@ -13,7 +13,7 @@ static struct termios orig;
 static i32 raw_active = 0;
 
 static char* abuf;
-static i32 alen;
+static i32 alen, acap;
 
 i32 term_init(void) {
     if (!isatty(STDIN_FILENO)) return -1;
@@ -31,8 +31,8 @@ i32 term_init(void) {
     if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw) == -1) return -1;
     raw_active = 1;
 
-    abuf = 0;
-    alen = 0;
+    abuf = NULL;
+    alen = acap = 0;
 
     atexit(term_shutdown);
     term_writef("\x1b[?1049h");
@@ -42,11 +42,16 @@ i32 term_init(void) {
 }
 
 void term_shutdown(void) {
+    if (!raw_active) return;
+    
     term_writef("\x1b[?1049l");
     term_flush();
 
-    if (!raw_active) return;
     tcsetattr(STDIN_FILENO, TCSAFLUSH, &orig);
+
+    free(abuf);
+    acap = alen = 0;
+
     raw_active = 0;
 }
 
@@ -220,11 +225,17 @@ Event term_poll(void) {
 }
 
 static void abuf_append(const char* s, i32 len) {
-    char* new = realloc(abuf, alen + len);
+    if (alen + len > acap) {
+        i32 cap = acap ? acap : 4096;
+        while (cap < alen + len) cap *= 2;
 
-    if (new == NULL) return;
-    memcpy(&new[alen], s, len);
-    abuf = new;
+        char* new = realloc(abuf, cap);
+        if (new == NULL) return;
+    
+        abuf = new;
+    }
+
+    memcpy(abuf + alen, s, len);
     alen += len;
 }
 
@@ -250,8 +261,6 @@ void term_flush(void) {
         if (n < 0) { if (errno == EINTR) continue; break; }
         off += n;
     }
-    free(abuf);
-    abuf = NULL;
     alen = 0;
 }
 
