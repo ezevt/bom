@@ -3,6 +3,7 @@
 
 #include "defs.h"
 #include "term.h"
+#include "buffer.h"
 #include "rect.h"
 
 typedef struct {
@@ -10,18 +11,6 @@ typedef struct {
     i32 col;
     i32 goal_col;
 } Cursor;
-
-typedef struct {
-    i32 size;
-    char* chars;
-} Line;
-
-typedef struct {
-    i32 num_lines;
-    Line* lines;
-
-    const char* filename;
-} Buffer;
 
 typedef struct {
     Buffer* buf;

@@ -1,4 +1,5 @@
 #include "editor.h"
+#include "buffer.h"
 #include "defs.h"
 #include "term.h"
 #include <stdio.h>
@@ -7,47 +8,6 @@
 #include <unistd.h>
 
 #define V_MARGIN 8
-
-static void editor_append_line(Editor* e, char* s, i32 len, i32 at) {
-    if (at < 0) at = 0;
-    if (at > e->buffer.num_lines) at = e->buffer.num_lines;
-
-    e->buffer.lines = realloc(e->buffer.lines, sizeof(Line) * (e->buffer.num_lines + 1));
-
-    if (at != e->buffer.num_lines)
-        memmove(e->buffer.lines + at + 1,
-                e->buffer.lines + at,
-                (e->buffer.num_lines - at) * sizeof(Line));
-
-
-    e->buffer.lines[at].size = len;
-    e->buffer.lines[at].chars = malloc(len + 1);
-    memcpy(e->buffer.lines[at].chars, s, len);
-    e->buffer.lines[at].chars[len] = '\0';
-    e->buffer.num_lines++;
-}
-
-void editor_open(Editor* e, const char* filepath) {
-    e->buffer.filename = filepath;
-
-    FILE* fp = fopen(filepath, "r");
-    if (!fp) return;
-
-    char* line = NULL;
-    size_t linecap = 0;
-    ssize_t linelen;
-
-    while ((linelen = getline(&line, &linecap, fp)) != -1) {
-        while (linelen > 0 && (line[linelen - 1] == '\n' ||
-                               line[linelen - 1] == '\r'))
-            linelen--;
-
-        editor_append_line(e, line, linelen, e->buffer.num_lines);
-    }
-
-    free(line);
-    fclose(fp);
-}
 
 static Layout editor_layout(Editor* e) {
     Rect full = { 0, 0, e->cols, e->rows };
@@ -79,18 +39,11 @@ void editor_init(Editor* e) {
 }
 
 void editor_shutdown(Editor* e) {
+    buffer_free(&e->buffer);
+}
 
-    if (e->buffer.num_lines > 0) {
-        for (i32 i = 0; i < e->buffer.num_lines; i++) {
-            free(e->buffer.lines[i].chars);            
-        }
-    }
-
-    if (e->buffer.lines != NULL) {
-        free(e->buffer.lines);
-        e->buffer.lines = NULL;
-        e->buffer.num_lines = 0;
-    }
+void editor_open(Editor* e, const char* filepath) {
+    buffer_open(&e->buffer, filepath);
 }
 
 static void scroll_track(i32* offset, i32 cursor, i32 size, i32 margin) {
@@ -106,7 +59,7 @@ static void scroll_track(i32* offset, i32 cursor, i32 size, i32 margin) {
         *offset = 0;
 }
 
-static void editor_scroll(Editor* e, View* v, Rect r) {
+static void view_scroll(View* v, Rect r) {
     i32 margin = V_MARGIN;
 
     if (margin * 2 >= r.h)
@@ -116,109 +69,11 @@ static void editor_scroll(Editor* e, View* v, Rect r) {
     scroll_track(&v->col_offset, v->cursor.col, r.w, 0);
 }
 
-static i32 line_len(Buffer* b, i32 line) {
-    if (line < 0 || line >= b->num_lines) return 0;
-    return b->lines[line].size;
-}
-
 static void cursor_clamp_col(Editor* e) {
     i32 len = line_len(&e->buffer, e->view.cursor.line);
     e->view.cursor.col = e->view.cursor.goal_col;
     if (e->view.cursor.col > len) e->view.cursor.col = len;
     if (e->view.cursor.col < 0)   e->view.cursor.col = 0;
-}
-
-static void line_insert_char(Line* line, i32 col, i32 c) {
-    if (col > line->size) col = line->size;
-    if (col < 0) col = 0;
-
-    char* new = realloc(line->chars, line->size + 2);
-
-    memmove(new + col + 1,
-            new + col,
-            line->size - col + 1);
-
-    new[col] = c;
-    line->chars = new;
-    line->size++;
-}
-
-static void line_remove_char(Line* line, i32 col) {
-    if (col <= 0 || col >= line->size) return;
-    memmove(line->chars + col - 1,
-            line->chars + col,
-            line->size - col + 1);
-    line->size--;
-}
-
-static void line_merge(Editor* e, i32 line) {
-    if (line <= 0 || line >= e->buffer.num_lines) return;
-
-    Line* l1 = &e->buffer.lines[line-1];
-    Line* l2 = &e->buffer.lines[line];
-
-    i32 len = l1->size + l2->size;
-    char* new = realloc(l1->chars, len + 1);
-    if (!new) return;
-
-    memcpy(new + l1->size, l2->chars, l2->size);
-    new[len] = '\0';
-
-    l1->chars = new;
-    l1->size  = len;
-
-    free(l2->chars);
-
-    memmove(&e->buffer.lines[line], &e->buffer.lines[line+1],
-            (e->buffer.num_lines - line - 1) * sizeof(Line));
-
-    e->buffer.num_lines--;
-}
-
-static void insert_char(Editor* e, i32 c) {
-    
-    i32 row = e->view.cursor.line;
-    i32 col = e->view.cursor.col;
-
-    if (row >= e->buffer.num_lines) {
-        while (row >= e->buffer.num_lines) editor_append_line(e, "", 0, e->buffer.num_lines);
-    }
-    
-    line_insert_char(&e->buffer.lines[row], col, c);
-    e->view.cursor.col++;
-    e->view.cursor.goal_col = e->view.cursor.col;
-}
-
-static char* lines_to_string(Line* lines, i32 num_lines) {
-    i32 len = 0;
-    for (i32 i = 0; i < num_lines; i++) {
-        len += lines[i].size + 1;
-    }
-
-    char* buf = malloc(len+1);
-    
-    i32 idx = 0;
-    for (i32 i = 0; i < num_lines; i++) {
-        memcpy(buf+idx, lines[i].chars, lines[i].size);
-        idx += lines[i].size;
-        buf[idx++] = '\n';
-    }
-
-    buf[len] = '\0';
-
-    return buf;
-}
-
-static void save_file(Editor* e) {
-    char* buf = lines_to_string(e->buffer.lines, e->buffer.num_lines);
-
-    int fd = open(e->buffer.filename, O_RDWR|O_CREAT, 0644);
-
-    ftruncate(fd, 0);
-    write(fd, buf, strlen(buf));
-
-    close(fd);
-    free(buf);
 }
 
 void editor_dispatch(Editor* e, Event ev) {
@@ -230,7 +85,7 @@ void editor_dispatch(Editor* e, Event ev) {
         }
 
         if (ev.key.code == 'w') {
-            save_file(e);
+            buffer_save(&e->buffer);
             return;
         }
     }
@@ -270,38 +125,41 @@ void editor_dispatch(Editor* e, Event ev) {
         }
         case 'h':
             if (ev.key.mods != MOD_CTRL) {
-                insert_char(e, ev.key.code);
+                buffer_insert_char(&e->buffer, e->view.cursor.line, e->view.cursor.col, ev.key.code);
+                e->view.cursor.col++;
                 break;
             }
         case KEY_BACKSPACE:
             if (e->view.cursor.col > 0) {
-                line_remove_char(&e->buffer.lines[e->view.cursor.line], e->view.cursor.col);
+                buffer_remove_char(&e->buffer, e->view.cursor.line, e->view.cursor.col);
                 e->view.cursor.col--;
             } else if (e->view.cursor.line > 0) {
                 e->view.cursor.line--;
                 e->view.cursor.col = line_len(&e->buffer, e->view.cursor.line);
                 e->view.cursor.goal_col = e->view.cursor.col;
-                line_merge(e, e->view.cursor.line+1);
+                buffer_merge_lines(&e->buffer, e->view.cursor.line+1);
             }
             break;
         case KEY_DEL:
             if (e->view.cursor.col < line_len(&e->buffer, e->view.cursor.line)) {
-                line_remove_char(&e->buffer.lines[e->view.cursor.line], e->view.cursor.col+1);
+                buffer_remove_char(&e->buffer, e->view.cursor.line, e->view.cursor.col+1);
             } else if (e->view.cursor.line < e->buffer.num_lines - 1) {
-                line_merge(e, e->view.cursor.line+1);
+                buffer_merge_lines(&e->buffer, e->view.cursor.line+1);
             }
             break;
         case KEY_ENTER:
-            editor_append_line(e, "", 0, e->view.cursor.line+1);
+            buffer_split_line(&e->buffer, e->view.cursor.line, e->view.cursor.col);
             e->view.cursor.line++;
-            cursor_clamp_col(e);
+            e->view.cursor.col = 0;
+            e->view.cursor.goal_col = e->view.cursor.goal_col;
             break;
         default:
-            insert_char(e, ev.key.code);
+            buffer_insert_char(&e->buffer, e->view.cursor.line, e->view.cursor.col, ev.key.code);
+            e->view.cursor.col++;
             break;
     }
 
-    editor_scroll(e, &e->view, e->layout.text);
+    view_scroll(&e->view, e->layout.text);
 }
 
 static void draw_text(Editor* e, Rect view) {
