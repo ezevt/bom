@@ -75,6 +75,27 @@ void buffer_free(Buffer *b) {
 
 }
 
+static void line_update_render(Line* l) {
+    i32 tabs = 0;
+    for (i32 i = 0; i < l->size; i++)
+        if (l->chars[i] == '\t') tabs++;
+
+    free(l->render);
+    l->render = malloc(l->size + tabs * (TAB_STOP - 1) + 1);
+
+    i32 idx = 0;
+    for (i32 i = 0; i < l->size; i++) {
+        if (l->chars[i] == '\t') {
+            l->render[idx++] = ' ';
+            while (idx % TAB_STOP != 0) l->render[idx++] = ' ';
+        } else {
+            l->render[idx++] = l->chars[i];
+        }
+    }
+    l->render[idx] = '\0';
+    l->rsize = idx;
+}
+
 void buffer_append_line(Buffer* b, char* s, i32 len, i32 at) {
     if (at < 0) at = 0;
     if (at > b->num_lines) at = b->num_lines;
@@ -86,12 +107,16 @@ void buffer_append_line(Buffer* b, char* s, i32 len, i32 at) {
                 b->lines + at,
                 (b->num_lines - at) * sizeof(Line));
 
+    Line* l = &b->lines[at];
 
-    b->lines[at].size = len;
-    b->lines[at].chars = malloc(len + 1);
-    memcpy(b->lines[at].chars, s, len);
-    b->lines[at].chars[len] = '\0';
+    l->size = len;
+    l->chars = malloc(len + 1);
+    memcpy(l->chars, s, len);
+    l->chars[len] = '\0';
+    l->render = NULL;
     b->num_lines++;
+
+    line_update_render(l);
 }
 
 void buffer_insert_text(Buffer* b, i32 line, i32 col, const char* s, i32 n) {
@@ -108,44 +133,15 @@ void buffer_insert_text(Buffer* b, i32 line, i32 col, const char* s, i32 n) {
 
     l->chars = new;
     l->size += n;
+
+    line_update_render(l);
 }
 
 void buffer_delete_range(Buffer* b, i32 line, i32 from, i32 to) {
     Line* l = &b->lines[line];
     memmove(l->chars + from, l->chars + to, l->size - to + 1);
     l->size -= (to - from);
-}
-
-void buffer_insert_char(Buffer* b, i32 line, i32 col, i32 c) {
-    if (line < 0 || line >= b->num_lines) return;
-
-    Line* l = &b->lines[line];
-
-    if (col > l->size) col = l->size;
-    if (col < 0) col = 0;
-
-    char* new = realloc(l->chars, l->size + 2);
-
-    memmove(new + col + 1,
-            new + col,
-            l->size - col + 1);
-
-    new[col] = c;
-    l->chars = new;
-    l->size++;
-}
-
-void buffer_remove_char(Buffer* b, i32 line, i32 col) {
-    if (line < 0 || line > b->num_lines) return;
-
-    Line* l = &b->lines[line];
-
-    if (col <= 0 || col >= l->size) return;
-    
-    memmove(l->chars + col - 1,
-            l->chars + col,
-            l->size - col + 1);
-    l->size--;
+    line_update_render(l);
 }
 
 void buffer_merge_lines(Buffer* b, i32 line) {
@@ -170,6 +166,8 @@ void buffer_merge_lines(Buffer* b, i32 line) {
             (b->num_lines - line - 1) * sizeof(Line));
 
     b->num_lines--;
+
+    line_update_render(l1);
 }
 
 void buffer_split_line(Buffer *b, i32 line, i32 col) {
@@ -186,6 +184,8 @@ void buffer_split_line(Buffer *b, i32 line, i32 col) {
     l = &b->lines[line];
     l->size -= len;
     l->chars[l->size] = '\0';
+
+    line_update_render(l);
 }
 
 i32 line_len(Buffer* b, i32 line) {
@@ -215,3 +215,25 @@ i32 line_byte_at(Buffer* b, i32 line, i32 target_col) {
     }
     return i;
 }
+
+i32 line_cx_to_rx(Buffer* b, i32 line, i32 cx) {
+    Line* l = &b->lines[line];
+
+    i32 rx = 0;
+    i32 i = 0;
+    i32 cp;
+
+    while (i < cx && i < l->size) {
+        i32 n = utf8_decode(l->chars + i, l->size - i, &cp);
+
+        if (cp == '\t')
+            rx += TAB_STOP - (rx % TAB_STOP);
+        else
+            rx += utf8_width(cp);
+
+        i += n;
+    }
+
+    return rx;
+}
+

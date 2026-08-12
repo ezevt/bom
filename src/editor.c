@@ -76,7 +76,7 @@ static void cursor_clamp_col(View* v) {
 }
 
 static void cursor_sync_goal(View* v) {
-    v->cursor.goal_col = line_width(v->buf, v->cursor.line, v->cursor.col);
+    v->cursor.goal_col = line_cx_to_rx(v->buf, v->cursor.line, v->cursor.col);
 }
 
 static void view_dispatch(View* v, Event ev, Rect r) {
@@ -175,25 +175,6 @@ void editor_dispatch(Editor* e, Event ev) {
     view_dispatch(&e->view, ev, e->layout.text);
 }
 
-static void draw_line(Buffer* b, i32 line, i32 col_offset, i32 width) {
-    Line* l = &b->lines[line];
-    i32 i = 0, col = 0, cp;
-
-    while (i < l->size && col < col_offset) {
-        i += utf8_decode(l->chars + i, l->size - i, &cp);
-        col += utf8_width(cp);
-    }
-
-    while (i < l->size) {
-        i32 n = utf8_decode(l->chars + i, l->size - i, &cp);
-        i32 w = utf8_width(cp);
-        if (col - col_offset + w > width) break;
-        term_write(l->chars + i, n);
-        col += w;
-        i += n;
-    }
-}
-
 static void draw_text(View* v, Rect view) {
     for (i32 i = 0; i < view.h; i++) {
         term_move_cursor(view.y+i, view.x);
@@ -207,10 +188,10 @@ static void draw_text(View* v, Rect view) {
                 term_write("~", 1);
             }
         } else {
-            int len = v->buf->lines[file_row].size - v->col_offset;
+            int len = v->buf->lines[file_row].rsize - v->col_offset;
             if (len > 0) {
                 if (len > view.w) len = view.w;
-                term_write(v->buf->lines[file_row].chars + v->col_offset, len);
+                term_write(v->buf->lines[file_row].render + v->col_offset, len);
             }
         }
 
@@ -253,7 +234,7 @@ void editor_render(Editor* e) {
     Cursor* c = &e->view.cursor;
 
     i32 cur_col = (e->buffer.num_lines > 0)
-        ? line_width(&e->buffer, c->line, c->col)
+        ? line_cx_to_rx(&e->buffer, c->line, c->col)
         : 0;
 
     i32 screen_y = r.y + c->line - e->view.row_offset;

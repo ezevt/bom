@@ -3,9 +3,14 @@
 
 #include "defs.h"
 
+#define TAB_STOP 4
+
 typedef struct {
     i32 size;
     char* chars;
+
+    i32 rsize;
+    char* render;
 } Line;
 
 typedef struct {
@@ -29,5 +34,6 @@ void buffer_split_line(Buffer* b, i32 line, i32 col);
 i32 line_len(Buffer* b, i32 line);
 i32 line_width(Buffer* b, i32 line, i32 upto);
 i32 line_byte_at(Buffer* b, i32 line, i32 target_col);
+i32 line_cx_to_rx(Buffer* b, i32 line, i32 cx);
 
 #endif
