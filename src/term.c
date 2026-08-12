@@ -233,6 +233,7 @@ static void abuf_append(const char* s, i32 len) {
         if (new == NULL) return;
     
         abuf = new;
+        acap = cap;
     }
 
     memcpy(abuf + alen, s, len);

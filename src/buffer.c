@@ -1,10 +1,10 @@
 #include "buffer.h"
+#include "utf8.h"
 
 #include <stdio.h>
 #include <string.h>
 #include <fcntl.h>
 #include <unistd.h>
-
 
 void buffer_open(Buffer* b, const char* filepath) {
     b->filename = filepath;
@@ -94,6 +94,28 @@ void buffer_append_line(Buffer* b, char* s, i32 len, i32 at) {
     b->num_lines++;
 }
 
+void buffer_insert_text(Buffer* b, i32 line, i32 col, const char* s, i32 n) {
+    if (line < 0 || line >= b->num_lines) return;
+    Line* l = &b->lines[line];
+    if (col < 0) col = 0;
+    if (col > l->size) col = l->size;
+
+    char* new = realloc(l->chars, l->size + n + 1);
+    if (!new) return;
+
+    memmove(new + col + n, new + col, l->size - col + 1); /* +1 = NUL */
+    memcpy(new + col, s, n);
+
+    l->chars = new;
+    l->size += n;
+}
+
+void buffer_delete_range(Buffer* b, i32 line, i32 from, i32 to) {
+    Line* l = &b->lines[line];
+    memmove(l->chars + from, l->chars + to, l->size - to + 1);
+    l->size -= (to - from);
+}
+
 void buffer_insert_char(Buffer* b, i32 line, i32 col, i32 c) {
     if (line < 0 || line >= b->num_lines) return;
 
@@ -169,4 +191,27 @@ void buffer_split_line(Buffer *b, i32 line, i32 col) {
 i32 line_len(Buffer* b, i32 line) {
     if (line < 0 || line >= b->num_lines) return 0;
     return b->lines[line].size;
+}
+
+i32 line_width(Buffer* b, i32 line, i32 upto) {
+    Line* l = &b->lines[line];
+    i32 i = 0, col = 0, cp;
+    while (i < upto && i < l->size) {
+        i += utf8_decode(l->chars + i, l->size - i, &cp);
+        col += utf8_width(cp);
+    }
+    return col;
+}
+
+i32 line_byte_at(Buffer* b, i32 line, i32 target_col) {
+    Line* l = &b->lines[line];
+    i32 i = 0, col = 0, cp;
+    while (i < l->size) {
+        i32 n = utf8_decode(l->chars + i, l->size - i, &cp);
+        i32 w = utf8_width(cp);
+        if (col + w > target_col) break;
+        col += w;
+        i += n;
+    }
+    return i;
 }
