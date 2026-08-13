@@ -24,12 +24,7 @@ static Layout editor_layout(Editor* e) {
 void editor_init(Editor* e) {
     e->running = true;
 
-    e->buffer = (Buffer) {
-        .filename = NULL,
-        .num_lines = 0,
-        .lines = NULL,
-        .dirty = false,
-    };
+    buffer_init(&e->buffer);
 
     e->view = (View){
         .buf = &e->buffer,
@@ -69,16 +64,19 @@ static void view_scroll(View* v, Rect r) {
 
     scroll_track(&v->row_offset, v->cursor.line, r.h, margin);
 
-    i32 col = line_width(v->buf, v->cursor.line, v->cursor.col);
+    Line* l = &v->buf->lines[v->cursor.line];
+    i32 col = line_width(l, v->cursor.col);
     scroll_track(&v->col_offset, col, r.w, 0);
 }
 
 static void cursor_clamp_col(View* v) {
-    v->cursor.col = line_byte_at(v->buf, v->cursor.line, v->cursor.goal_col);
+    Line* l = &v->buf->lines[v->cursor.line];
+    v->cursor.col = line_byte_at(l, v->cursor.goal_col);
 }
 
 static void cursor_sync_goal(View* v) {
-    v->cursor.goal_col = line_cx_to_rx(v->buf, v->cursor.line, v->cursor.col);
+    Line* l = &v->buf->lines[v->cursor.line];
+    v->cursor.goal_col = line_cx_to_rx(l, v->cursor.col);
 }
 
 static void view_dispatch(View* v, Event ev, Rect r) {
@@ -112,12 +110,12 @@ static void view_dispatch(View* v, Event ev, Rect r) {
                 v->cursor.col = utf8_prev(l->chars, v->cursor.col);
             } else if (v->cursor.line > 0) {
                 v->cursor.line--;
-                v->cursor.col = line_len(v->buf, v->cursor.line);
+                v->cursor.col = v->buf->lines[v->cursor.line].size;
             }
             cursor_sync_goal(v);
             break;
         case KEY_RIGHT: {
-            i32 len = line_len(v->buf, v->cursor.line);
+            i32 len = v->buf->lines[v->cursor.line].size;
             if (v->cursor.col < len) {
                 v->cursor.col = utf8_next(l->chars, l->size, v->cursor.col);
             } else if (v->cursor.line < v->buf->num_lines - 1) {
@@ -134,13 +132,13 @@ static void view_dispatch(View* v, Event ev, Rect r) {
                 v->cursor.col = prev;
             } else if (v->cursor.line > 0) {
                 v->cursor.line--;
-                v->cursor.col = line_len(v->buf, v->cursor.line);
+                v->cursor.col = v->buf->lines[v->cursor.line].size;
                 buffer_merge_lines(v->buf, v->cursor.line + 1);
             }
             cursor_sync_goal(v);
             break;
         case KEY_DEL:
-            if (v->cursor.col < line_len(v->buf, v->cursor.line)) {
+            if (v->cursor.col < v->buf->lines[v->cursor.line].size) {
                 i32 next = utf8_next(l->chars, l->size, v->cursor.col);
                 buffer_delete_range(v->buf, v->cursor.line, v->cursor.col, next);
             } else if (v->cursor.line < v->buf->num_lines - 1) {
@@ -213,7 +211,7 @@ static void draw_status(Editor* e, Rect r) {
             e->view.buf->filename != NULL ? e->view.buf->filename : "[No Name]",
             e->view.buf->dirty ? " *" : "");
     View* v = &e->view;
-    i32 col = line_width(v->buf, v->cursor.line, v->cursor.col);
+    i32 col = line_cx_to_rx(&v->buf->lines[v->cursor.line], v->cursor.col);
     int rlen = snprintf(rstatus, sizeof(rstatus), "%d,%d - %d lines",
             v->cursor.line+1,
             col+1,
@@ -242,7 +240,7 @@ void editor_render(Editor* e) {
     Cursor* c = &e->view.cursor;
 
     i32 cur_col = (e->buffer.num_lines > 0)
-        ? line_cx_to_rx(&e->buffer, c->line, c->col)
+        ? line_cx_to_rx(&e->buffer.lines[c->line], c->col)
         : 0;
 
     i32 screen_y = r.y + c->line - e->view.row_offset;

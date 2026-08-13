@@ -1,10 +1,17 @@
 #include "buffer.h"
-#include "utf8.h"
+#include "line.h"
 
 #include <stdio.h>
 #include <string.h>
 #include <fcntl.h>
 #include <unistd.h>
+
+void buffer_init(Buffer* b) {
+    b->filename = NULL;
+    b->num_lines = 0;
+    b->lines = NULL;
+    b->dirty = false;
+}
 
 void buffer_open(Buffer* b, const char* filepath) {
     b->filename = filepath;
@@ -67,7 +74,7 @@ void buffer_save(Buffer* b) {
 void buffer_free(Buffer *b) {
     if (b->num_lines > 0) {
         for (i32 i = 0; i < b->num_lines; i++) {
-            free(b->lines[i].chars);            
+            line_free(&b->lines[i]);
         }
     }
 
@@ -77,27 +84,6 @@ void buffer_free(Buffer *b) {
         b->num_lines = 0;
     }
 
-}
-
-static void line_update_render(Line* l) {
-    i32 tabs = 0;
-    for (i32 i = 0; i < l->size; i++)
-        if (l->chars[i] == '\t') tabs++;
-
-    free(l->render);
-    l->render = malloc(l->size + tabs * (TAB_STOP - 1) + 1);
-
-    i32 idx = 0;
-    for (i32 i = 0; i < l->size; i++) {
-        if (l->chars[i] == '\t') {
-            l->render[idx++] = ' ';
-            while (idx % TAB_STOP != 0) l->render[idx++] = ' ';
-        } else {
-            l->render[idx++] = l->chars[i];
-        }
-    }
-    l->render[idx] = '\0';
-    l->rsize = idx;
 }
 
 void buffer_append_line(Buffer* b, char* s, i32 len, i32 at) {
@@ -112,45 +98,10 @@ void buffer_append_line(Buffer* b, char* s, i32 len, i32 at) {
                 (b->num_lines - at) * sizeof(Line));
 
     Line* l = &b->lines[at];
+    line_init(l);
+    line_set(l, s, len);
 
-    l->size = len;
-    l->chars = malloc(len + 1);
-    memcpy(l->chars, s, len);
-    l->chars[len] = '\0';
-    l->render = NULL;
     b->num_lines++;
-
-    line_update_render(l);
-    b->dirty = true;
-}
-
-void buffer_insert_text(Buffer* b, i32 line, i32 col, const char* s, i32 n) {
-    if (line < 0) return;
-
-    while (b->num_lines <= line) buffer_append_line(b, "", 0, b->num_lines);
-
-    Line* l = &b->lines[line];
-    if (col < 0) col = 0;
-    if (col > l->size) col = l->size;
-
-    char* new = realloc(l->chars, l->size + n + 1);
-    if (!new) return;
-
-    memmove(new + col + n, new + col, l->size - col + 1); /* +1 = NUL */
-    memcpy(new + col, s, n);
-
-    l->chars = new;
-    l->size += n;
-
-    line_update_render(l);
-    b->dirty = true;
-}
-
-void buffer_delete_range(Buffer* b, i32 line, i32 from, i32 to) {
-    Line* l = &b->lines[line];
-    memmove(l->chars + from, l->chars + to, l->size - to + 1);
-    l->size -= (to - from);
-    line_update_render(l);
     b->dirty = true;
 }
 
@@ -160,24 +111,14 @@ void buffer_merge_lines(Buffer* b, i32 line) {
     Line* l1 = &b->lines[line-1];
     Line* l2 = &b->lines[line];
 
-    i32 len = l1->size + l2->size;
-    char* new = realloc(l1->chars, len + 1);
-    if (!new) return;
+    line_insert(l1, l1->size, l2->chars, l2->size);
 
-    memcpy(new + l1->size, l2->chars, l2->size);
-    new[len] = '\0';
-
-    l1->chars = new;
-    l1->size  = len;
-
-    free(l2->chars);
+    line_free(l2);
 
     memmove(&b->lines[line], &b->lines[line+1],
             (b->num_lines - line - 1) * sizeof(Line));
 
     b->num_lines--;
-
-    line_update_render(l1);
     b->dirty = true;
 }
 
@@ -189,64 +130,32 @@ void buffer_split_line(Buffer *b, i32 line, i32 col) {
 
     if (col < 0 || col > l->size) return;
 
-    i32 len = line_len(b, line)-col;
+    i32 len = l->size-col;
 
     buffer_append_line(b, l->chars+col, len, line+1);
-    
-    l = &b->lines[line];
-    l->size -= len;
-    l->chars[l->size] = '\0';
 
-    line_update_render(l);
+    l = &b->lines[line];
+    line_truncate(l, col);
+
     b->dirty = true;
 }
 
-i32 line_len(Buffer* b, i32 line) {
-    if (line < 0 || line >= b->num_lines) return 0;
-    return b->lines[line].size;
-}
+void buffer_insert_text(Buffer* b, i32 line, i32 col, const char* s, i32 n) {
+    if (line < 0) return;
 
-i32 line_width(Buffer* b, i32 line, i32 upto) {
+    while (line >= b->num_lines) buffer_append_line(b, "", 0, b->num_lines);
+
     Line* l = &b->lines[line];
-    i32 i = 0, col = 0, cp;
-    while (i < upto && i < l->size) {
-        i += utf8_decode(l->chars + i, l->size - i, &cp);
-        col += utf8_width(cp);
-    }
-    return col;
+    line_insert(l, col, s, n);
+
+    b->dirty = true;
 }
 
-i32 line_byte_at(Buffer* b, i32 line, i32 target_col) {
+void buffer_delete_range(Buffer* b, i32 line, i32 from, i32 to) {
+    if (line < 0 || line >= b->num_lines) return;
+
     Line* l = &b->lines[line];
-    i32 i = 0, col = 0, cp;
-    while (i < l->size) {
-        i32 n = utf8_decode(l->chars + i, l->size - i, &cp);
-        i32 w = utf8_width(cp);
-        if (col + w > target_col) break;
-        col += w;
-        i += n;
-    }
-    return i;
+    line_delete(l, from, to);
+
+    b->dirty = true;
 }
-
-i32 line_cx_to_rx(Buffer* b, i32 line, i32 cx) {
-    Line* l = &b->lines[line];
-
-    i32 rx = 0;
-    i32 i = 0;
-    i32 cp;
-
-    while (i < cx && i < l->size) {
-        i32 n = utf8_decode(l->chars + i, l->size - i, &cp);
-
-        if (cp == '\t')
-            rx += TAB_STOP - (rx % TAB_STOP);
-        else
-            rx += utf8_width(cp);
-
-        i += n;
-    }
-
-    return rx;
-}
-
