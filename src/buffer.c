@@ -26,6 +26,8 @@ void buffer_open(Buffer* b, const char* filepath) {
 
     free(line);
     fclose(fp);
+
+    b->dirty = false;
 }
 
 static char* lines_to_string(Line* lines, i32 num_lines) {
@@ -58,6 +60,8 @@ void buffer_save(Buffer* b) {
 
     close(fd);
     free(buf);
+
+    b->dirty = false;
 }
 
 void buffer_free(Buffer *b) {
@@ -117,10 +121,14 @@ void buffer_append_line(Buffer* b, char* s, i32 len, i32 at) {
     b->num_lines++;
 
     line_update_render(l);
+    b->dirty = true;
 }
 
 void buffer_insert_text(Buffer* b, i32 line, i32 col, const char* s, i32 n) {
-    if (line < 0 || line >= b->num_lines) return;
+    if (line < 0) return;
+
+    while (b->num_lines <= line) buffer_append_line(b, "", 0, b->num_lines);
+
     Line* l = &b->lines[line];
     if (col < 0) col = 0;
     if (col > l->size) col = l->size;
@@ -135,6 +143,7 @@ void buffer_insert_text(Buffer* b, i32 line, i32 col, const char* s, i32 n) {
     l->size += n;
 
     line_update_render(l);
+    b->dirty = true;
 }
 
 void buffer_delete_range(Buffer* b, i32 line, i32 from, i32 to) {
@@ -142,6 +151,7 @@ void buffer_delete_range(Buffer* b, i32 line, i32 from, i32 to) {
     memmove(l->chars + from, l->chars + to, l->size - to + 1);
     l->size -= (to - from);
     line_update_render(l);
+    b->dirty = true;
 }
 
 void buffer_merge_lines(Buffer* b, i32 line) {
@@ -168,9 +178,11 @@ void buffer_merge_lines(Buffer* b, i32 line) {
     b->num_lines--;
 
     line_update_render(l1);
+    b->dirty = true;
 }
 
 void buffer_split_line(Buffer *b, i32 line, i32 col) {
+    if (b->lines == NULL) buffer_append_line(b, "", 0, 0);
     if (line < 0 || line >= b->num_lines) return;
     
     Line* l = &b->lines[line];
@@ -186,6 +198,7 @@ void buffer_split_line(Buffer *b, i32 line, i32 col) {
     l->chars[l->size] = '\0';
 
     line_update_render(l);
+    b->dirty = true;
 }
 
 i32 line_len(Buffer* b, i32 line) {

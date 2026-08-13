@@ -17,6 +17,7 @@ typedef struct {
     i32 num_lines;
     Line* lines;
 
+    b8 dirty;
     const char* filename;
 } Buffer;
 

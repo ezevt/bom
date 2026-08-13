@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <fcntl.h>
+#include <time.h>
 #include <unistd.h>
 
 #define V_MARGIN 8
@@ -24,9 +25,10 @@ void editor_init(Editor* e) {
     e->running = true;
 
     e->buffer = (Buffer) {
-        .filename = "[No Name]",
+        .filename = NULL,
         .num_lines = 0,
         .lines = NULL,
+        .dirty = false,
     };
 
     e->view = (View){
@@ -88,7 +90,9 @@ static void view_dispatch(View* v, Event ev, Rect r) {
         }
     }
 
-    Line* l = &v->buf->lines[v->cursor.line];
+    Line* l = v->buf->lines != NULL
+        ? &v->buf->lines[v->cursor.line]
+        : NULL;
 
     switch (ev.key.code) {
         case KEY_UP:
@@ -112,7 +116,6 @@ static void view_dispatch(View* v, Event ev, Rect r) {
             }
             cursor_sync_goal(v);
             break;
-
         case KEY_RIGHT: {
             i32 len = line_len(v->buf, v->cursor.line);
             if (v->cursor.col < len) {
@@ -206,10 +209,15 @@ static void draw_status(Editor* e, Rect r) {
     term_writef("\x1b[0K");
     term_writef("\x1b[7m");
     char status[80], rstatus[80];
-    int len = snprintf(status, sizeof(status), "%.20s - %d lines", e->buffer.filename, e->buffer.num_lines);
+    int len = snprintf(status, sizeof(status), "%.20s%s",
+            e->view.buf->filename != NULL ? e->view.buf->filename : "[No Name]",
+            e->view.buf->dirty ? " *" : "");
     View* v = &e->view;
     i32 col = line_width(v->buf, v->cursor.line, v->cursor.col);
-    int rlen = snprintf(rstatus, sizeof(rstatus), "%d,%d", v->cursor.line+1, col+1);
+    int rlen = snprintf(rstatus, sizeof(rstatus), "%d,%d - %d lines",
+            v->cursor.line+1,
+            col+1,
+            e->view.buf->num_lines);
     if (len > r.w) len = r.w;
     term_write(status, len);
     while(len < r.w) {
