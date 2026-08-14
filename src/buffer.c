@@ -7,9 +7,7 @@
 #include <unistd.h>
 
 void buffer_init(Buffer* b) {
-    b->filename = NULL;
-    b->num_lines = 0;
-    b->lines = NULL;
+    *b = (Buffer){0};
     b->dirty = false;
 }
 

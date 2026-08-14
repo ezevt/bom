@@ -5,20 +5,7 @@
 #include "term.h"
 #include "buffer.h"
 #include "rect.h"
-
-typedef struct {
-    i32 line;
-    i32 col;
-    i32 goal_col;
-} Cursor;
-
-typedef struct {
-    Buffer* buf;
-
-    Cursor cursor;
-    i32 row_offset;
-    i32 col_offset;
-} View;
+#include "view.h"
 
 typedef struct {
     Rect text;
